@@ -1,0 +1,117 @@
+// app/api/feedback/analysis/route.ts
+// Endpoint untuk menerima & mengambil SATU consolidated AI analysis report
+// dari n8n (bukan per-komentar, tapi satu laporan untuk semua komentar)
+
+import { NextRequest, NextResponse } from "next/server";
+import { addAIAnalysis, getLatestAIAnalysis, getAllAIAnalyses } from "@/lib/store";
+
+const CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Cache-Control": "no-cache",
+};
+
+// ─── GET: Ambil AI analysis terbaru ─────────────────────────────────────────
+export async function GET(req: NextRequest) {
+    const { searchParams } = new URL(req.url);
+    const all = searchParams.get("all") === "true";
+
+    if (all) {
+        return NextResponse.json(
+            { success: true, data: getAllAIAnalyses() },
+            { headers: CORS_HEADERS }
+        );
+    }
+
+    const latest = getLatestAIAnalysis();
+    return NextResponse.json(
+        { success: true, data: latest },
+        { headers: CORS_HEADERS }
+    );
+}
+
+// ─── POST: Terima consolidated AI analysis dari n8n ──────────────────────────
+// Expected body:
+// {
+//   "report": "<full AI analysis text>",
+//   "feedbackCount": 20,
+//   "sources": ["instagram", "google_maps", "tiktok", "facebook"]
+// }
+export async function POST(req: NextRequest) {
+    try {
+        const body = await req.json();
+
+        // DEBUG: log apa yang diterima dari n8n
+        console.log("[POST /api/feedback/analysis] Body received:", JSON.stringify(body).slice(0, 500));
+
+        // Terima berbagai field name yang mungkin dikirim n8n AI Agent:
+        // output, text, response, answer, report
+        const report =
+            body.report ||
+            body.output ||
+            body.text ||
+            body.response ||
+            body.answer ||
+            "";
+
+        const { feedbackCount, sources } = body;
+
+        if (!report || typeof report !== "string" || report.trim() === "") {
+            console.log("[POST /api/feedback/analysis] Report kosong. Keys yang diterima:", Object.keys(body));
+            return NextResponse.json(
+                { success: false, message: `Field 'report' wajib diisi. Keys diterima: ${Object.keys(body).join(", ")}` },
+                { status: 400, headers: CORS_HEADERS }
+            );
+        }
+
+
+        // Toleran terhadap string number (n8n sering kirim angka sebagai string)
+        const parsedCount =
+            typeof feedbackCount === "number"
+                ? feedbackCount
+                : typeof feedbackCount === "string"
+                    ? parseInt(feedbackCount, 10) || 0
+                    : 0;
+
+        // Toleran terhadap comma-separated string atau array
+        let parsedSources: string[] = [];
+        if (Array.isArray(sources)) {
+            parsedSources = sources;
+        } else if (typeof sources === "string" && sources.trim()) {
+            parsedSources = sources.split(",").map((s) => s.trim()).filter(Boolean);
+        }
+
+        const newAnalysis = addAIAnalysis({
+            report: report.trim(),
+            generatedAt: new Date().toISOString(),
+            feedbackCount: parsedCount,
+            sources: parsedSources,
+        });
+
+        return NextResponse.json(
+            {
+                success: true,
+                message: "Analisis AI berhasil disimpan",
+                data: newAnalysis,
+            },
+            { status: 201, headers: CORS_HEADERS }
+        );
+    } catch (err) {
+        console.error("[POST /api/feedback/analysis]", err);
+        return NextResponse.json(
+            { success: false, message: "Format data tidak valid" },
+            { status: 400, headers: CORS_HEADERS }
+        );
+    }
+}
+
+// ─── OPTIONS: CORS preflight ─────────────────────────────────────────────────
+export async function OPTIONS() {
+    return new NextResponse(null, {
+        status: 204,
+        headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        },
+    });
+}
