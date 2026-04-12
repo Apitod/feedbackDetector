@@ -131,3 +131,51 @@ export function FilterSelect({
         </div>
     );
 }
+// ─── Triage Badge ────────────────────────────────────────────────────────────
+export function TriageBadge({
+    priority,
+}: {
+    priority?: FeedbackItem["triage"];
+}) {
+    if (!priority) return null;
+    
+    // Icons for each priority
+    const AlertOctagon = (props: any) => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"></polygon><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+    );
+    const AlertTriangle = (props: any) => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+    );
+    const Circle = (props: any) => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="12" r="10"></circle></svg>
+    );
+
+    const config = {
+        merah: { 
+            label: "MERAH (TINGGI)", 
+            cls: "badge-negative", 
+            icon: AlertOctagon,
+            style: { background: "rgba(239, 68, 68, 0.1)", color: "#ef4444", border: "1px solid rgba(239, 68, 68, 0.2)" }
+        },
+        kuning: { 
+            label: "KUNING (SEDANG)", 
+            cls: "badge-warning", 
+            icon: AlertTriangle,
+            style: { background: "rgba(245, 158, 11, 0.1)", color: "#f59e0b", border: "1px solid rgba(245, 158, 11, 0.2)" }
+        },
+        hijau: { 
+            label: "HIJAU (RENDAH)", 
+            cls: "badge-positive", 
+            icon: Circle,
+            style: { background: "rgba(34, 197, 94, 0.1)", color: "#22c55e", border: "1px solid rgba(34, 197, 94, 0.2)" }
+        },
+    }[priority] ?? { label: priority, cls: "badge-neutral", icon: Circle, style: {} };
+
+    const Icon = config.icon;
+    return (
+        <span className={`badge ${config.cls}`} style={{ ...config.style, gap: 5, padding: "2px 8px" }}>
+            <Icon size={11} strokeWidth={2.5} />
+            {config.label}
+        </span>
+    );
+}

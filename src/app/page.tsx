@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
     RefreshCw,
     MessageSquare,
@@ -24,10 +24,16 @@ import {
     Zap,
     Sun,
     Moon,
+    Upload,
+    FileSpreadsheet,
+    CloudUpload,
+    Loader2,
+    Rocket,
+    FileCheck2,
 } from "lucide-react";
 import { FeedbackItem, AIAnalysis } from "@/lib/store";
 import { SentimentPieChart, SourceBarChart } from "@/components/charts";
-import { FilterSelect, RatingDisplay, SentimentBadge, SourceBadge } from "@/components/ui-bits";
+import { FilterSelect, RatingDisplay, SentimentBadge, SourceBadge, TriageBadge } from "@/components/ui-bits";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Stats {
@@ -44,9 +50,17 @@ const SOURCE_LABEL: Record<string, string> = {
     tiktok: "TikTok",
     facebook: "Facebook",
     google_maps: "Google Maps",
+    offline_rs: "Offline RS",
 };
 
 // ─── Main Dashboard Page ──────────────────────────────────────────────────────
+// ─── Types for offline upload ─────────────────────────────────────────────────
+interface OfflineRow {
+    namaPetugas: string;
+    isiKeluhan: string;
+    tanggal: string;
+}
+
 export default function DashboardPage() {
     const [feedbacks, setFeedbacks] = useState<FeedbackItem[]>([]);
     const [stats, setStats] = useState<Stats | null>(null);
@@ -60,6 +74,21 @@ export default function DashboardPage() {
     const [isLive, setIsLive] = useState(true);
     const [analysisExpanded, setAnalysisExpanded] = useState(false);
     const [theme, setTheme] = useState<"light" | "dark">("light");
+
+    // ─── Offline Upload State ─────────────────────────────────────────────────
+    const [showUploadModal, setShowUploadModal] = useState(false);
+    const [uploadFile, setUploadFile] = useState<File | null>(null);
+    const [parsedRows, setParsedRows] = useState<OfflineRow[]>([]);
+    const [parseError, setParseError] = useState<string | null>(null);
+    const [dragOver, setDragOver] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // ─── Held offline data (persists after modal close, sent with trigger) ────
+    const [heldOfflineData, setHeldOfflineData] = useState<OfflineRow[]>([]);
+
+    // ─── Analysis trigger state ───────────────────────────────────────────────
+    const [analysisTriggering, setAnalysisTriggering] = useState(false);
+    const [triggerMessage, setTriggerMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
     // ─── Theme Management ─────────────────────────────────────────────────────
     useEffect(() => {
@@ -78,6 +107,108 @@ export default function DashboardPage() {
         setTheme(newTheme);
         localStorage.setItem("theme", newTheme);
         document.documentElement.classList.toggle("dark", newTheme === "dark");
+    };
+
+    // ─── CSV Parser ───────────────────────────────────────────────────────────
+    const parseCSV = (text: string): OfflineRow[] => {
+        const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
+        if (lines.length < 2) throw new Error("File CSV minimal 2 baris (header + 1 data).");
+
+        // Deteksi delimiter: koma atau titik koma
+        const delimiter = lines[0].includes(";") ? ";" : ",";
+
+        const headers = lines[0].split(delimiter).map((h) => h.trim().replace(/^"|"$/g, "").toLowerCase());
+
+        // Flexible header matching
+        const findCol = (h: string[], ...candidates: string[]) =>
+            h.findIndex((x) => candidates.some((c) => x.includes(c)));
+
+        const colNama = findCol(headers, "nama", "petugas", "officer");
+        const colKeluhan = findCol(headers, "keluhan", "komentar", "comment", "isi", "text");
+        const colTanggal = findCol(headers, "tanggal", "date", "waktu", "time");
+
+        if (colKeluhan === -1) {
+            throw new Error(`Kolom keluhan/komentar tidak ditemukan. Header yang tersedia: ${headers.join(", ")}`);
+        }
+
+        const rows: OfflineRow[] = [];
+        for (let i = 1; i < lines.length; i++) {
+            const cols = lines[i].split(delimiter).map((c) => c.trim().replace(/^"|"$/g, ""));
+            const isiKeluhan = cols[colKeluhan] ?? "";
+            if (!isiKeluhan.trim()) continue;
+            rows.push({
+                namaPetugas: colNama !== -1 ? (cols[colNama] ?? "") : "",
+                isiKeluhan,
+                tanggal: colTanggal !== -1 ? (cols[colTanggal] ?? new Date().toISOString()) : new Date().toISOString(),
+            });
+        }
+        return rows;
+    };
+
+    // ─── Handle file selection (via click or drop) ────────────────────────────
+    const handleFile = (file: File) => {
+        setUploadFile(null);
+        setParsedRows([]);
+        setParseError(null);
+        setUploadStatus("idle");
+        setUploadMessage("");
+
+        if (!file.name.endsWith(".csv")) {
+            setParseError("Hanya file .csv yang diterima.");
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const text = e.target?.result as string;
+                const rows = parseCSV(text);
+                if (rows.length === 0) {
+                    setParseError("Tidak ada baris data valid di dalam file.");
+                    return;
+                }
+                setUploadFile(file);
+                setParsedRows(rows);
+            } catch (err) {
+                setParseError(String(err instanceof Error ? err.message : err));
+            }
+        };
+        reader.readAsText(file, "UTF-8");
+    };
+
+    // ─── Confirm offline data (close modal & hold data for trigger) ──────────
+    const handleConfirmOfflineData = () => {
+        if (parsedRows.length === 0) return;
+        setHeldOfflineData(parsedRows);
+        setShowUploadModal(false);
+        setTriggerMessage(null);
+    };
+
+    // ─── Trigger analysis (mulai menganalisis) ────────────────────────────────
+    const handleTriggerAnalysis = async () => {
+        setAnalysisTriggering(true);
+        setTriggerMessage(null);
+        try {
+            const res = await fetch("/api/trigger-analysis", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(heldOfflineData),
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                setTriggerMessage({ type: "success", text: data.message ?? "Analisis dimulai!" });
+                // Poll for new analysis result after 15s
+                setTimeout(() => fetchData(true), 15000);
+                setTimeout(() => fetchData(true), 45000);
+            } else {
+                setTriggerMessage({ type: "error", text: data.message ?? "Gagal memicu analisis." });
+            }
+        } catch (err) {
+            setTriggerMessage({ type: "error", text: "Gagal terhubung ke server." });
+            console.error("Trigger error:", err);
+        } finally {
+            setAnalysisTriggering(false);
+        }
     };
 
     // ─── Fetch data ───────────────────────────────────────────────────────────
@@ -225,6 +356,42 @@ export default function DashboardPage() {
 
                     {/* Controls */}
                     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        {/* Upload Offline Button */}
+                        <button
+                            id="btn-upload-offline"
+                            onClick={() => {
+                                setShowUploadModal(true);
+                                setUploadFile(null);
+                                setParsedRows([]);
+                                setParseError(null);
+                            }}
+                            style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 7,
+                                padding: "8px 16px",
+                                borderRadius: 8,
+                                background: heldOfflineData.length > 0
+                                    ? "linear-gradient(135deg, #059669, #0d9488)"
+                                    : "linear-gradient(135deg, #0ea5e9, #6366f1)",
+                                border: "none",
+                                cursor: "pointer",
+                                fontSize: 12,
+                                fontWeight: 600,
+                                color: "white",
+                                transition: "all 0.2s",
+                                fontFamily: "inherit",
+                                boxShadow: heldOfflineData.length > 0
+                                    ? "0 4px 14px rgba(5,150,105,0.35)"
+                                    : "0 4px 14px rgba(99,102,241,0.35)",
+                            }}
+                        >
+                            {heldOfflineData.length > 0 ? (
+                                <><FileCheck2 size={13} /> {heldOfflineData.length} Data Offline ✓</>
+                            ) : (
+                                <><Upload size={13} /> Upload Data Offline</>
+                            )}
+                        </button>
                         {/* Theme Toggle */}
                         <button
                             onClick={toggleTheme}
@@ -412,6 +579,159 @@ export default function DashboardPage() {
                             {loading ? "" : `${stats?.sourceCount[stats?.dominantSource ?? ""] ?? 0} ulasan`}
                         </p>
                     </div>
+                </div>
+
+                {/* ── Trigger Analysis Banner ── */}
+                <div
+                    style={{
+                        marginBottom: 24,
+                        borderRadius: 16,
+                        overflow: "hidden",
+                        border: "1px solid rgba(139,92,246,0.2)",
+                        background: "linear-gradient(135deg, rgba(139,92,246,0.06) 0%, rgba(236,72,153,0.04) 100%)",
+                    }}
+                >
+                    <div
+                        style={{
+                            padding: "20px 28px",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 16,
+                            flexWrap: "wrap",
+                        }}
+                    >
+                        {/* Left: info */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                            <div
+                                style={{
+                                    width: 44,
+                                    height: 44,
+                                    borderRadius: 12,
+                                    background: "linear-gradient(135deg, #7c3aed, #ec4899)",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    boxShadow: "0 6px 20px rgba(124,58,237,0.4)",
+                                    flexShrink: 0,
+                                }}
+                            >
+                                <Rocket size={20} color="white" />
+                            </div>
+                            <div>
+                                <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>
+                                    Mulai Analisis AI Terpadu
+                                </p>
+                                <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
+                                    {heldOfflineData.length > 0
+                                        ? `Siap memulai: data online (scraping) + ${heldOfflineData.length} data offline akan dianalisis bersama.`
+                                        : "Klik untuk memulai scraping online dan analisis AI. Atau upload CSV dulu untuk sertakan data offline."}
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Right: status + button */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+                            {/* Trigger result message */}
+                            {triggerMessage && (
+                                <div
+                                    style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: 8,
+                                        padding: "8px 14px",
+                                        borderRadius: 8,
+                                        background: triggerMessage.type === "success"
+                                            ? "rgba(16,185,129,0.1)"
+                                            : "rgba(239,68,68,0.1)",
+                                        border: `1px solid ${triggerMessage.type === "success" ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)"}`,
+                                        color: triggerMessage.type === "success" ? "#059669" : "#ef4444",
+                                        maxWidth: 320,
+                                    }}
+                                >
+                                    {triggerMessage.type === "success"
+                                        ? <CheckCircle2 size={14} style={{ flexShrink: 0 }} />
+                                        : <AlertTriangle size={14} style={{ flexShrink: 0 }} />}
+                                    <p style={{ fontSize: 12, fontWeight: 500 }}>{triggerMessage.text}</p>
+                                </div>
+                            )}
+
+                            {/* The big CTA button */}
+                            <button
+                                id="btn-start-analysis"
+                                onClick={handleTriggerAnalysis}
+                                disabled={analysisTriggering}
+                                style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 10,
+                                    padding: "12px 28px",
+                                    borderRadius: 12,
+                                    background: analysisTriggering
+                                        ? "var(--bg-secondary)"
+                                        : "linear-gradient(135deg, #7c3aed 0%, #ec4899 100%)",
+                                    border: analysisTriggering ? "1px solid var(--border-color)" : "none",
+                                    cursor: analysisTriggering ? "not-allowed" : "pointer",
+                                    fontSize: 14,
+                                    fontWeight: 700,
+                                    color: analysisTriggering ? "var(--text-muted)" : "white",
+                                    transition: "all 0.2s",
+                                    fontFamily: "inherit",
+                                    boxShadow: analysisTriggering
+                                        ? "none"
+                                        : "0 6px 24px rgba(124,58,237,0.45)",
+                                    letterSpacing: "0.02em",
+                                }}
+                            >
+                                {analysisTriggering ? (
+                                    <>
+                                        <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />
+                                        Memulai Analisis...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Rocket size={16} />
+                                        🚀 Mulai Menganalisis
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* If held data, show pill */}
+                    {heldOfflineData.length > 0 && (
+                        <div
+                            style={{
+                                borderTop: "1px dashed rgba(139,92,246,0.15)",
+                                padding: "10px 28px",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 10,
+                            }}
+                        >
+                            <FileCheck2 size={13} color="#059669" />
+                            <p style={{ fontSize: 12, color: "#059669", fontWeight: 600 }}>
+                                {heldOfflineData.length} baris data offline siap ikut dianalisis
+                            </p>
+                            <button
+                                onClick={() => setHeldOfflineData([])}
+                                style={{
+                                    marginLeft: "auto",
+                                    background: "none",
+                                    border: "none",
+                                    cursor: "pointer",
+                                    fontSize: 11,
+                                    color: "var(--text-muted)",
+                                    fontFamily: "inherit",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 4,
+                                }}
+                            >
+                                <X size={11} /> Hapus data offline
+                            </button>
+                        </div>
+                    )}
                 </div>
 
                 {/* ── Charts Row ── */}
@@ -615,6 +935,7 @@ export default function DashboardPage() {
                                     { value: "tiktok", label: "TikTok" },
                                     { value: "facebook", label: "Facebook" },
                                     { value: "google_maps", label: "Google Maps" },
+                                    { value: "offline_rs", label: "Offline RS" },
                                 ]}
                             />
                             <FilterSelect
@@ -659,6 +980,7 @@ export default function DashboardPage() {
                                         <th>Tanggal</th>
                                         <th>Rating</th>
                                         <th>Sentimen</th>
+                                        <th>Skala Prioritas</th>
                                         <th></th>
                                     </tr>
                                 </thead>
@@ -691,6 +1013,9 @@ export default function DashboardPage() {
                                             </td>
                                             <td>
                                                 <SentimentBadge sentiment={fb.sentiment} />
+                                            </td>
+                                            <td>
+                                                <TriageBadge priority={fb.triage} />
                                             </td>
                                             <td>
                                                 <button
@@ -785,6 +1110,277 @@ export default function DashboardPage() {
                     </div>
                 )}
 
+                {/* ── Upload Offline Modal ── */}
+                {showUploadModal && (
+                    <div
+                        id="modal-upload-offline"
+                        style={{
+                            position: "fixed",
+                            inset: 0,
+                            background: "rgba(10,17,35,0.55)",
+                            backdropFilter: "blur(8px)",
+                            zIndex: 300,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            padding: 24,
+                        }}
+                        onClick={() => setShowUploadModal(false)}
+                    >
+                        <div
+                            className="glass-card"
+                            style={{
+                                maxWidth: 660,
+                                width: "100%",
+                                padding: 0,
+                                overflow: "hidden",
+                                maxHeight: "90vh",
+                                display: "flex",
+                                flexDirection: "column",
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            {/* Modal Header */}
+                            <div
+                                style={{
+                                    padding: "22px 28px",
+                                    borderBottom: "1px solid var(--border-color)",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "space-between",
+                                    background: "linear-gradient(135deg, rgba(14,165,233,0.06), rgba(99,102,241,0.06))",
+                                }}
+                            >
+                                <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                                    <div
+                                        style={{
+                                            width: 40,
+                                            height: 40,
+                                            borderRadius: 12,
+                                            background: "linear-gradient(135deg, #0ea5e9, #6366f1)",
+                                            display: "flex",
+                                            alignItems: "center",
+                                            justifyContent: "center",
+                                            boxShadow: "0 4px 14px rgba(99,102,241,0.35)",
+                                        }}
+                                    >
+                                        <FileSpreadsheet size={20} color="white" />
+                                    </div>
+                                    <div>
+                                        <h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>
+                                            Upload Data Feedback Offline
+                                        </h2>
+                                        <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
+                                            CSV dengan header: <code style={{ background: "var(--bg-secondary)", padding: "1px 5px", borderRadius: 4, fontSize: 11 }}>Nama Petugas, Isi Keluhan, Tanggal</code>
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    id="btn-close-upload-modal"
+                                    onClick={() => setShowUploadModal(false)}
+                                    style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)" }}
+                                >
+                                    <X size={20} />
+                                </button>
+                            </div>
+
+                            {/* Modal Body */}
+                            <div style={{ padding: 28, overflowY: "auto", flex: 1 }}>
+
+                                {/* Drop Zone */}
+                                <div
+                                    onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                                    onDragLeave={() => setDragOver(false)}
+                                    onDrop={(e) => {
+                                        e.preventDefault();
+                                        setDragOver(false);
+                                        const file = e.dataTransfer.files[0];
+                                        if (file) handleFile(file);
+                                    }}
+                                    onClick={() => fileInputRef.current?.click()}
+                                    style={{
+                                        border: `2px dashed ${dragOver ? "#6366f1" : "var(--border-color)"}`,
+                                        borderRadius: 14,
+                                        padding: "36px 20px",
+                                        textAlign: "center",
+                                        cursor: "pointer",
+                                        background: dragOver ? "rgba(99,102,241,0.06)" : "var(--bg-secondary)",
+                                        transition: "all 0.2s",
+                                        marginBottom: 20,
+                                    }}
+                                >
+                                    <input
+                                        ref={fileInputRef}
+                                        id="input-csv-file"
+                                        type="file"
+                                        accept=".csv"
+                                        style={{ display: "none" }}
+                                        onChange={(e) => {
+                                            const file = e.target.files?.[0];
+                                            if (file) handleFile(file);
+                                        }}
+                                    />
+                                    <CloudUpload
+                                        size={42}
+                                        style={{
+                                            margin: "0 auto 12px",
+                                            color: dragOver ? "#6366f1" : "var(--text-muted)",
+                                            opacity: 0.7,
+                                            display: "block",
+                                        }}
+                                    />
+                                    {uploadFile ? (
+                                        <>
+                                            <p style={{ fontSize: 14, fontWeight: 600, color: "#6366f1" }}>
+                                                ✓ {uploadFile.name}
+                                            </p>
+                                            <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
+                                                {parsedRows.length} baris data ditemukan — klik untuk ganti file
+                                            </p>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <p style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
+                                                Drag &amp; drop atau klik untuk memilih file
+                                            </p>
+                                            <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 6 }}>
+                                                Hanya file <strong>.csv</strong> yang diterima
+                                            </p>
+                                        </>
+                                    )}
+                                </div>
+
+                                {/* Parse Error */}
+                                {parseError && (
+                                    <div
+                                        style={{
+                                            background: "rgba(239,68,68,0.08)",
+                                            border: "1px solid rgba(239,68,68,0.25)",
+                                            borderRadius: 10,
+                                            padding: "12px 16px",
+                                            marginBottom: 20,
+                                            display: "flex",
+                                            alignItems: "flex-start",
+                                            gap: 10,
+                                            color: "#ef4444",
+                                        }}
+                                    >
+                                        <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+                                        <p style={{ fontSize: 13 }}>{parseError}</p>
+                                    </div>
+                                )}
+
+                                {/* Data Preview Table */}
+                                {parsedRows.length > 0 && (
+                                    <div style={{ marginBottom: 20 }}>
+                                        <p style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 10 }}>
+                                            Preview Data ({parsedRows.length} baris)
+                                        </p>
+                                        <div style={{ overflowX: "auto", borderRadius: 10, border: "1px solid var(--border-color)" }}>
+                                            <table className="data-table" style={{ marginBottom: 0 }}>
+                                                <thead>
+                                                    <tr>
+                                                        <th>#</th>
+                                                        <th>Nama Petugas</th>
+                                                        <th>Isi Keluhan</th>
+                                                        <th>Tanggal</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {parsedRows.slice(0, 5).map((row, idx) => (
+                                                        <tr key={idx}>
+                                                            <td style={{ color: "var(--text-muted)", fontSize: 11 }}>{idx + 1}</td>
+                                                            <td style={{ fontSize: 12 }}>{row.namaPetugas || <em style={{ opacity: 0.5 }}>—</em>}</td>
+                                                            <td style={{ fontSize: 12, maxWidth: 280 }}>
+                                                                <p style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                                                                    {row.isiKeluhan}
+                                                                </p>
+                                                            </td>
+                                                            <td style={{ fontSize: 11, whiteSpace: "nowrap", color: "var(--text-muted)" }}>{row.tanggal}</td>
+                                                        </tr>
+                                                    ))}
+                                                    {parsedRows.length > 5 && (
+                                                        <tr>
+                                                            <td colSpan={4} style={{ textAlign: "center", fontSize: 11, color: "var(--text-muted)", padding: "8px 0" }}>
+                                                                ... dan {parsedRows.length - 5} baris lainnya
+                                                            </td>
+                                                        </tr>
+                                                    )}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                )}
+
+
+                            </div>
+
+                            {/* Modal Footer */}
+                            <div
+                                style={{
+                                    padding: "18px 28px",
+                                    borderTop: "1px solid var(--border-color)",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "space-between",
+                                    gap: 12,
+                                    background: "var(--bg-secondary)",
+                                }}
+                            >
+                                <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                                    {parsedRows.length > 0
+                                        ? `${parsedRows.length} baris data siap dikonfirmasi`
+                                        : "Pilih file CSV untuk memulai"}
+                                </p>
+                                <div style={{ display: "flex", gap: 10 }}>
+                                    <button
+                                        id="btn-cancel-upload"
+                                        onClick={() => setShowUploadModal(false)}
+                                        style={{
+                                            padding: "8px 18px",
+                                            borderRadius: 8,
+                                            border: "1px solid var(--border-color)",
+                                            background: "transparent",
+                                            color: "var(--text-secondary)",
+                                            cursor: "pointer",
+                                            fontSize: 12,
+                                            fontFamily: "inherit",
+                                            fontWeight: 600,
+                                        }}
+                                    >
+                                        Batal
+                                    </button>
+                                    <button
+                                        id="btn-submit-upload"
+                                        onClick={handleConfirmOfflineData}
+                                        disabled={parsedRows.length === 0}
+                                        style={{
+                                            padding: "8px 20px",
+                                            borderRadius: 8,
+                                            background: parsedRows.length > 0
+                                                ? "linear-gradient(135deg, #0ea5e9, #6366f1)"
+                                                : "var(--bg-secondary)",
+                                            border: "none",
+                                            color: parsedRows.length > 0 ? "white" : "var(--text-muted)",
+                                            cursor: parsedRows.length === 0 ? "not-allowed" : "pointer",
+                                            fontSize: 12,
+                                            fontFamily: "inherit",
+                                            fontWeight: 700,
+                                            display: "flex",
+                                            alignItems: "center",
+                                            gap: 7,
+                                            boxShadow: parsedRows.length > 0 ? "0 4px 14px rgba(99,102,241,0.35)" : "none",
+                                            transition: "all 0.2s",
+                                        }}
+                                    >
+                                        <FileCheck2 size={13} /> Konfirmasi & Simpan
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* ── n8n Integration Info Banner ── */}
                 <div
                     style={{
@@ -842,6 +1438,11 @@ function AIReportRenderer({ report }: { report: string }) {
             color: "var(--accent-amber)",
             bg: "var(--bg-secondary)",
         },
+        "PRIORITAS PENANGANAN (TRIASE)": {
+            icon: <AlertTriangle size={14} />,
+            color: "#ef4444",
+            bg: "rgba(239, 68, 68, 0.05)",
+        },
         "REKOMENDASI PRAKTIS": {
             icon: <Zap size={14} />,
             color: "var(--accent-secondary)",
@@ -875,36 +1476,96 @@ function AIReportRenderer({ report }: { report: string }) {
                     color: "#8b5cf6",
                     bg: "rgba(139,92,246,0.08)",
                 };
+
+                // ── Special highlight for REKOMENDASI PRAKTIS ──────────────
+                const isRekomendasi = title === "REKOMENDASI PRAKTIS";
+
                 return (
                     <div
                         key={title}
                         style={{
-                            background: cfg.bg,
-                            border: `1px solid ${cfg.color}33`,
-                            borderRadius: 10,
-                            padding: 16,
+                            background: isRekomendasi
+                                ? "linear-gradient(135deg, rgba(124,58,237,0.12) 0%, rgba(251,191,36,0.10) 100%)"
+                                : cfg.bg,
+                            border: isRekomendasi
+                                ? "1.5px solid rgba(251,191,36,0.45)"
+                                : `1px solid ${cfg.color}33`,
+                            borderRadius: isRekomendasi ? 14 : 10,
+                            padding: isRekomendasi ? 22 : 16,
+                            gridColumn: isRekomendasi ? "1 / -1" : undefined,
+                            boxShadow: isRekomendasi
+                                ? "0 4px 24px rgba(124,58,237,0.12), 0 0 0 1px rgba(251,191,36,0.12)"
+                                : undefined,
+                            position: "relative",
+                            overflow: "hidden",
                         }}
                     >
+                        {/* Gold shimmer strip for rekomendasi */}
+                        {isRekomendasi && (
+                            <div
+                                style={{
+                                    position: "absolute",
+                                    top: 0,
+                                    left: 0,
+                                    right: 0,
+                                    height: 3,
+                                    background: "linear-gradient(90deg, #7c3aed, #f59e0b, #7c3aed)",
+                                    backgroundSize: "200% 100%",
+                                }}
+                            />
+                        )}
+
                         <div
                             style={{
                                 display: "flex",
                                 alignItems: "center",
-                                gap: 6,
-                                marginBottom: 10,
-                                color: cfg.color,
+                                gap: 8,
+                                marginBottom: isRekomendasi ? 14 : 10,
+                                color: isRekomendasi ? "#f59e0b" : cfg.color,
                             }}
                         >
-                            {cfg.icon}
-                            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                            {isRekomendasi ? <Zap size={16} fill="#f59e0b" color="#f59e0b" /> : cfg.icon}
+                            <span
+                                style={{
+                                    fontSize: isRekomendasi ? 13 : 11,
+                                    fontWeight: 800,
+                                    letterSpacing: "0.07em",
+                                    textTransform: "uppercase",
+                                    background: isRekomendasi
+                                        ? "linear-gradient(90deg, #7c3aed, #f59e0b)"
+                                        : undefined,
+                                    WebkitBackgroundClip: isRekomendasi ? "text" : undefined,
+                                    WebkitTextFillColor: isRekomendasi ? "transparent" : undefined,
+                                    color: isRekomendasi ? undefined : cfg.color,
+                                }}
+                            >
                                 {title}
                             </span>
+                            {isRekomendasi && (
+                                <span
+                                    style={{
+                                        marginLeft: 6,
+                                        fontSize: 10,
+                                        fontWeight: 700,
+                                        padding: "2px 8px",
+                                        borderRadius: 99,
+                                        background: "linear-gradient(90deg, rgba(124,58,237,0.15), rgba(251,191,36,0.15))",
+                                        border: "1px solid rgba(251,191,36,0.3)",
+                                        color: "#f59e0b",
+                                        letterSpacing: "0.05em",
+                                    }}
+                                >
+                                    ★ PRIORITAS MANAJEMEN
+                                </span>
+                            )}
                         </div>
                         <div
                             style={{
-                                fontSize: 13,
+                                fontSize: isRekomendasi ? 14 : 13,
                                 color: "var(--text-secondary)",
-                                lineHeight: 1.7,
+                                lineHeight: 1.8,
                                 whiteSpace: "pre-wrap",
+                                fontWeight: isRekomendasi ? 500 : undefined,
                             }}
                         >
                             {content}
@@ -924,6 +1585,7 @@ function parseAIReport(report: string): { title: string; content: string }[] {
         "TEMUAN UTAMA PELANGGAN",
         "MASALAH KRITIS (JIKA ADA)",
         "PELUANG PENINGKATAN",
+        "PRIORITAS PENANGANAN (TRIASE)",
         "REKOMENDASI PRAKTIS",
     ];
 

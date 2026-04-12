@@ -98,12 +98,60 @@ export async function POST(req: NextRequest) {
                 source = "google_maps";
             }
 
+            // Auto-detect triage from commentary if not provided
+            let triage = item.triage as FeedbackItem["triage"];
+            if (!triage) {
+                const textLower = (item.comment ?? "").toLowerCase();
+                
+                // RED: Safety/Medical Risk/Severe Reputation
+                if (
+                    textLower.includes("licin") || 
+                    textLower.includes("jatuh") || 
+                    textLower.includes("bahaya") || 
+                    textLower.includes("infeksi") || 
+                    textLower.includes("malpraktik") ||
+                    textLower.includes("darurat") ||
+                    textLower.includes("gawat") ||
+                    textLower.includes("mati") ||
+                    textLower.includes("meninggal") ||
+                    textLower.includes("rusak") ||
+                    textLower.includes("obat salah")
+                ) {
+                    triage = "merah";
+                } 
+                // YELLOW: Comfort/Facility/Queue/Poor Service
+                else if (
+                    textLower.includes("kotor") || 
+                    textLower.includes("panas") || 
+                    textLower.includes("antri") || 
+                    textLower.includes("lama") || 
+                    textLower.includes("toilet") ||
+                    textLower.includes("wc") ||
+                    textLower.includes("parkir") ||
+                    textLower.includes("ac mati") ||
+                    textLower.includes("tunggu") ||
+                    textLower.includes("pelayanan") ||
+                    textLower.includes("security") ||
+                    textLower.includes("perawat") ||
+                    textLower.includes("buruk") ||
+                    textLower.includes("jelek") ||
+                    sentiment === "negatif"
+                ) {
+                    triage = "kuning";
+                }
+                // GREEN: Default for Neutral or Positive
+                else {
+                    triage = "hijau";
+                }
+            }
+
             const newItem = addFeedback({
                 source,
                 comment: item.comment ?? "",
                 date: item.date ?? new Date().toISOString(),
                 rating: item.rating ?? null,
                 sentiment: sentiment ?? "netral",
+                triage: triage,
             });
 
             created.push(newItem);

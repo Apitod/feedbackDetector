@@ -63,6 +63,48 @@ export async function POST(req: NextRequest) {
             );
         }
 
+        let finalReportString = report.trim();
+        
+        // Coba parsing jika AI mengembalikan format JSON (mengandung ```json)
+        try {
+            const rawText = finalReportString;
+            // Gunakan regex untuk menangkap isi dari block ```json ... ```
+            const jsonMatch = rawText.match(/```json\s*([\s\S]*?)\s*```/);
+            const jsonString = jsonMatch ? jsonMatch[1] : (rawText.trim().startsWith("{") ? rawText : null);
+            
+            if (jsonString) {
+                const parsedJson = JSON.parse(jsonString);
+                if (parsedJson.report) {
+                    finalReportString = parsedJson.report;
+                }
+                
+                // Jika AI juga menyertakan pemetaan individual, update tabel langsung!
+                if (Array.isArray(parsedJson.analyzed_feedbacks) && global.feedbackStore) {
+                    let updatedCount = 0;
+                    for (const aiItem of parsedJson.analyzed_feedbacks) {
+                        if (!aiItem.comment || !aiItem.triage || !aiItem.sentiment) continue;
+                        
+                        // Cari feedback yang cocok berdasarkan komentarnya (minimal 15 karakter awal)
+                        const searchStr = aiItem.comment.trim().toLowerCase();
+                        const snippet = searchStr.substring(0, 15);
+                        
+                        const match = global.feedbackStore.find(
+                            f => f.comment.toLowerCase().includes(snippet) || f.comment === aiItem.comment
+                        );
+                        
+                        if (match) {
+                            match.sentiment = aiItem.sentiment.toLowerCase();
+                            match.triage = aiItem.triage.toLowerCase();
+                            updatedCount++;
+                        }
+                    }
+                    console.log(`[POST /api/feedback/analysis] Berhasil mengupdate ${updatedCount} baris tabel dengan AI Triage.`);
+                }
+            }
+        } catch (err) {
+            console.error("[POST /api/feedback/analysis] Gagal parse JSON AI, menggunakan raw string", err);
+        }
+
 
         // Toleran terhadap string number (n8n sering kirim angka sebagai string)
         const parsedCount =
@@ -81,7 +123,7 @@ export async function POST(req: NextRequest) {
         }
 
         const newAnalysis = addAIAnalysis({
-            report: report.trim(),
+            report: finalReportString,
             generatedAt: new Date().toISOString(),
             feedbackCount: parsedCount,
             sources: parsedSources,
