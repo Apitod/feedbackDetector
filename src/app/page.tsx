@@ -73,6 +73,8 @@ export default function DashboardPage() {
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
     const [filterSource, setFilterSource] = useState("semua");
     const [filterSentiment, setFilterSentiment] = useState("semua");
+    const [marketFilterSource, setMarketFilterSource] = useState("semua");
+    const [marketFilterSentiment, setMarketFilterSentiment] = useState("semua");
     const [selectedRow, setSelectedRow] = useState<FeedbackItem | null>(null);
     const [isLive, setIsLive] = useState(true);
     const [analysisExpanded, setAnalysisExpanded] = useState(false);
@@ -264,8 +266,13 @@ export default function DashboardPage() {
         setRefreshing(true);
         try {
             const params = new URLSearchParams();
-            if (filterSource !== "semua") params.append("source", filterSource);
-            if (filterSentiment !== "semua") params.append("sentiment", filterSentiment);
+            
+            // Pilih filter berdasarkan tab aktif
+            const currentSource = activeTab === "internal" ? filterSource : marketFilterSource;
+            const currentSentiment = activeTab === "internal" ? filterSentiment : marketFilterSentiment;
+
+            if (currentSource !== "semua") params.append("source", currentSource);
+            if (currentSentiment !== "semua") params.append("sentiment", currentSentiment);
 
             const [fbRes, statsRes, analysisRes] = await Promise.all([
                 fetch(`/api/feedback?${params.toString()}`),
@@ -287,7 +294,7 @@ export default function DashboardPage() {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [filterSource, filterSentiment]);
+    }, [activeTab, filterSource, filterSentiment, marketFilterSource, marketFilterSentiment]);
 
     useEffect(() => {
         fetchData();
@@ -443,42 +450,6 @@ export default function DashboardPage() {
 
                     {/* Controls */}
                     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                        {/* Upload Offline Button */}
-                        <button
-                            id="btn-upload-offline"
-                            onClick={() => {
-                                setShowUploadModal(true);
-                                setUploadFile(null);
-                                setParsedRows([]);
-                                setParseError(null);
-                            }}
-                            style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 7,
-                                padding: "8px 16px",
-                                borderRadius: 8,
-                                background: heldOfflineData.length > 0
-                                    ? "linear-gradient(135deg, #059669, #0d9488)"
-                                    : "linear-gradient(135deg, #0ea5e9, #6366f1)",
-                                border: "none",
-                                cursor: "pointer",
-                                fontSize: 12,
-                                fontWeight: 600,
-                                color: "white",
-                                transition: "all 0.2s",
-                                fontFamily: "inherit",
-                                boxShadow: heldOfflineData.length > 0
-                                    ? "0 4px 14px rgba(5,150,105,0.35)"
-                                    : "0 4px 14px rgba(99,102,241,0.35)",
-                            }}
-                        >
-                            {heldOfflineData.length > 0 ? (
-                                <><FileCheck2 size={13} /> {heldOfflineData.length} Data Offline ✓</>
-                            ) : (
-                                <><Upload size={13} /> Upload Data Offline</>
-                            )}
-                        </button>
                         {/* Theme Toggle */}
                         <button
                             onClick={toggleTheme}
@@ -611,7 +582,7 @@ export default function DashboardPage() {
                             </div>
                         </div>
                         <p style={{ marginTop: 12, fontSize: 12, color: "var(--text-muted)" }}>
-                            Dari semua platform
+                            Offline RS &amp; Google Maps
                         </p>
                     </div>
 
@@ -666,6 +637,45 @@ export default function DashboardPage() {
                             {loading ? "" : `${stats?.sourceCount[stats?.dominantSource ?? ""] ?? 0} ulasan`}
                         </p>
                     </div>
+                </div>
+
+                {/* ── Offline Data Upload Section ── */}
+                <div style={{ marginBottom: 20 }}>
+                    <button
+                        id="btn-upload-offline"
+                        onClick={() => {
+                            setShowUploadModal(true);
+                            setUploadFile(null);
+                            setParsedRows([]);
+                            setParseError(null);
+                        }}
+                        style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 10,
+                            padding: "16px 24px",
+                            borderRadius: 16,
+                            background: heldOfflineData.length > 0
+                                ? "linear-gradient(135deg, #059669, #0d9488)"
+                                : "linear-gradient(135deg, var(--bg-secondary), var(--bg-secondary))",
+                            border: heldOfflineData.length > 0 ? "none" : "1px solid var(--border-color)",
+                            cursor: "pointer",
+                            fontSize: 14,
+                            fontWeight: 700,
+                            color: heldOfflineData.length > 0 ? "white" : "var(--text-primary)",
+                            fontFamily: "inherit",
+                            boxShadow: heldOfflineData.length > 0 ? "0 6px 20px rgba(13,148,136,0.3)" : "none",
+                            transition: "all 0.2s",
+                            width: "100%",
+                            justifyContent: "center",
+                        }}
+                    >
+                        {heldOfflineData.length > 0 ? (
+                            <><FileCheck2 size={18} /> {heldOfflineData.length} Data Offline Siap Dianalisis ✓</>
+                        ) : (
+                            <><Upload size={18} /> Klik untuk Upload Data Feedback Offline (CSV)</>
+                        )}
+                    </button>
                 </div>
 
                 {/* ── Trigger Analysis Banner ── */}
@@ -994,7 +1004,7 @@ export default function DashboardPage() {
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             <Table2 size={16} color="var(--accent-primary)" />
                             <h2 style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>
-                                Data Ulasan
+                                Data Ulasan Internal
                             </h2>
                             <span
                                 style={{
@@ -1007,7 +1017,7 @@ export default function DashboardPage() {
                                     border: "1px solid var(--border-color)",
                                 }}
                             >
-                                {feedbacks.length} hasil
+                                {feedbacks.filter(f => ["offline_rs", "google_maps"].includes(f.source)).length} hasil
                             </span>
                         </div>
 
@@ -1017,12 +1027,9 @@ export default function DashboardPage() {
                                 value={filterSource}
                                 onChange={setFilterSource}
                                 options={[
-                                    { value: "semua", label: "Semua Platform" },
-                                    { value: "instagram", label: "Instagram" },
-                                    { value: "tiktok", label: "TikTok" },
-                                    { value: "facebook", label: "Facebook" },
+                                    { value: "semua", label: "Semua Platform Internal" },
+                                    { value: "offline_rs", label: "Offline RS (CSV)" },
                                     { value: "google_maps", label: "Google Maps" },
-                                    { value: "offline_rs", label: "Offline RS" },
                                 ]}
                             />
                             <FilterSelect
@@ -1043,19 +1050,10 @@ export default function DashboardPage() {
                         <div style={{ textAlign: "center", padding: "48px 0", color: "var(--text-muted)" }}>
                             <div style={{ fontSize: 13 }}>Memuat data...</div>
                         </div>
-                    ) : feedbacks.length === 0 ? (
-                        <div
-                            style={{
-                                textAlign: "center",
-                                padding: "48px 0",
-                                color: "var(--text-muted)",
-                            }}
-                        >
-                            <MessageSquare size={40} style={{ margin: "0 auto 12px", opacity: 0.3 }} />
-                            <p style={{ fontSize: 14 }}>Tidak ada data feedback ditemukan.</p>
-                            <p style={{ fontSize: 12, marginTop: 4 }}>
-                                Coba ubah filter atau kirim data dari n8n.
-                            </p>
+                    ) : feedbacks.filter(f => ["offline_rs", "google_maps"].includes(f.source)).length === 0 ? (
+                        <div style={{ textAlign: "center", padding: "48px 0", color: "var(--text-muted)" }}>
+                            <Table2 size={32} style={{ margin: "0 auto 12px", opacity: 0.2, display: "block" }} />
+                            <p style={{ fontSize: 14 }}>Belum ada data ulasan internal.</p>
                         </div>
                     ) : (
                         <div style={{ overflowX: "auto" }}>
@@ -1072,63 +1070,65 @@ export default function DashboardPage() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {feedbacks.map((fb) => (
-                                        <tr key={fb.id}>
-                                            <td>
-                                                <SourceBadge source={fb.source} />
-                                            </td>
-                                            <td style={{ maxWidth: 300 }}>
-                                                <p
-                                                    style={{
-                                                        color: "var(--text-primary)",
-                                                        fontSize: 13,
-                                                        lineHeight: 1.5,
-                                                        display: "-webkit-box",
-                                                        WebkitLineClamp: 2,
-                                                        WebkitBoxOrient: "vertical",
-                                                        overflow: "hidden",
-                                                    }}
-                                                >
-                                                    {fb.comment}
-                                                </p>
-                                            </td>
-                                            <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>
-                                                {formatDate(fb.date)}
-                                            </td>
-                                            <td>
-                                                <RatingDisplay rating={fb.rating} />
-                                            </td>
-                                            <td>
-                                                <SentimentBadge sentiment={fb.sentiment} />
-                                            </td>
-                                            <td>
-                                                <TriageBadge priority={fb.triage} />
-                                            </td>
-                                            <td>
-                                                <button
-                                                    onClick={() =>
-                                                        setSelectedRow(selectedRow?.id === fb.id ? null : fb)
-                                                    }
-                                                    style={{
-                                                        background: "var(--bg-secondary)",
-                                                        border: "1px solid var(--border-color)",
-                                                        borderRadius: 6,
-                                                        color: "var(--accent-primary)",
-                                                        cursor: "pointer",
-                                                        padding: "4px 8px",
-                                                        fontSize: 11,
-                                                        fontFamily: "inherit",
-                                                        display: "flex",
-                                                        alignItems: "center",
-                                                        gap: 3,
-                                                        transition: "all 0.2s",
-                                                    }}
-                                                >
-                                                    <Info size={11} /> Detail
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
+                                    {feedbacks
+                                        .filter(f => ["offline_rs", "google_maps"].includes(f.source))
+                                        .map((fb) => (
+                                            <tr key={fb.id}>
+                                                <td>
+                                                    <SourceBadge source={fb.source} />
+                                                </td>
+                                                <td style={{ maxWidth: 300 }}>
+                                                    <p
+                                                        style={{
+                                                            color: "var(--text-primary)",
+                                                            fontSize: 13,
+                                                            lineHeight: 1.5,
+                                                            display: "-webkit-box",
+                                                            WebkitLineClamp: 2,
+                                                            WebkitBoxOrient: "vertical",
+                                                            overflow: "hidden",
+                                                        }}
+                                                    >
+                                                        {fb.comment}
+                                                    </p>
+                                                </td>
+                                                <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>
+                                                    {formatDate(fb.date)}
+                                                </td>
+                                                <td>
+                                                    <RatingDisplay rating={fb.rating} />
+                                                </td>
+                                                <td>
+                                                    <SentimentBadge sentiment={fb.sentiment} />
+                                                </td>
+                                                <td>
+                                                    <TriageBadge priority={fb.triage} />
+                                                </td>
+                                                <td>
+                                                    <button
+                                                        onClick={() =>
+                                                            setSelectedRow(selectedRow?.id === fb.id ? null : fb)
+                                                        }
+                                                        style={{
+                                                            background: "var(--bg-secondary)",
+                                                            border: "1px solid var(--border-color)",
+                                                            borderRadius: 6,
+                                                            color: "var(--accent-primary)",
+                                                            cursor: "pointer",
+                                                            padding: "4px 8px",
+                                                            fontSize: 11,
+                                                            fontFamily: "inherit",
+                                                            display: "flex",
+                                                            alignItems: "center",
+                                                            gap: 3,
+                                                            transition: "all 0.2s",
+                                                        }}
+                                                    >
+                                                        <Info size={11} /> Detail
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
                                 </tbody>
                             </table>
                         </div>
@@ -1640,6 +1640,154 @@ export default function DashboardPage() {
                                 ) : (
                                     <MarketReportRenderer report={marketAnalysis.report} />
                                 )}
+                            </div>
+                        )}
+                    </div>
+                    {/* Data Table Market */}
+                    <div className="glass-card" style={{ padding: 24, border: "1px solid rgba(8,145,178,0.15)" }}>
+                        {/* Table header */}
+                        <div
+                            style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                marginBottom: 16,
+                                flexWrap: "wrap",
+                                gap: 12,
+                            }}
+                        >
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <Table2 size={16} color="#0891b2" />
+                                <h2 style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>
+                                    Data Ulasan Market Intelligence
+                                </h2>
+                                <span
+                                    style={{
+                                        fontSize: 11,
+                                        background: "rgba(8,145,178,0.06)",
+                                        color: "#0891b2",
+                                        padding: "2px 8px",
+                                        borderRadius: 99,
+                                        fontWeight: 600,
+                                        border: "1px solid rgba(8,145,178,0.2)",
+                                    }}
+                                >
+                                    {feedbacks.filter(f => ["tiktok", "instagram", "facebook"].includes(f.source)).length} hasil
+                                </span>
+                            </div>
+
+                            {/* Filters */}
+                            <div style={{ display: "flex", gap: 8 }}>
+                                <FilterSelect
+                                    value={marketFilterSource}
+                                    onChange={setMarketFilterSource}
+                                    options={[
+                                        { value: "semua", label: "Semua Platform Market" },
+                                        { value: "instagram", label: "Instagram" },
+                                        { value: "tiktok", label: "TikTok" },
+                                        { value: "facebook", label: "Facebook" },
+                                    ]}
+                                />
+                                <FilterSelect
+                                    value={marketFilterSentiment}
+                                    onChange={setMarketFilterSentiment}
+                                    options={[
+                                        { value: "semua", label: "Semua Sentimen" },
+                                        { value: "positif", label: "Positif" },
+                                        { value: "netral", label: "Netral" },
+                                        { value: "negatif", label: "Negatif" },
+                                    ]}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Table */}
+                        {loading ? (
+                            <div style={{ textAlign: "center", padding: "48px 0", color: "var(--text-muted)" }}>
+                                <div style={{ fontSize: 13 }}>Memuat data ulasan...</div>
+                            </div>
+                        ) : feedbacks.filter(f => ["tiktok", "instagram", "facebook"].includes(f.source)).length === 0 ? (
+                            <div style={{ textAlign: "center", padding: "48px 0", color: "var(--text-muted)" }}>
+                                <MessageSquare size={32} style={{ margin: "0 auto 12px", opacity: 0.2, display: "block" }} />
+                                <p style={{ fontSize: 14 }}>Belum ada data ulasan market.</p>
+                                <p style={{ fontSize: 12, marginTop: 4 }}>Klik "Mulai Analisis Market" untuk mengambil data.</p>
+                            </div>
+                        ) : (
+                            <div style={{ overflowX: "auto" }}>
+                                <table className="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Platform</th>
+                                            <th>Komentar</th>
+                                            <th>Tanggal</th>
+                                            <th>Rating</th>
+                                            <th>Sentimen</th>
+                                            <th>Skala Prioritas</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {feedbacks
+                                            .filter(f => ["tiktok", "instagram", "facebook"].includes(f.source))
+                                            .map((fb) => (
+                                                <tr key={fb.id}>
+                                                    <td>
+                                                        <SourceBadge source={fb.source} />
+                                                    </td>
+                                                    <td style={{ maxWidth: 300 }}>
+                                                        <p
+                                                            style={{
+                                                                color: "var(--text-primary)",
+                                                                fontSize: 13,
+                                                                lineHeight: 1.5,
+                                                                display: "-webkit-box",
+                                                                WebkitLineClamp: 2,
+                                                                WebkitBoxOrient: "vertical",
+                                                                overflow: "hidden",
+                                                            }}
+                                                        >
+                                                            {fb.comment}
+                                                        </p>
+                                                    </td>
+                                                    <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>
+                                                        {formatDate(fb.date)}
+                                                    </td>
+                                                    <td>
+                                                        <RatingDisplay rating={fb.rating} />
+                                                    </td>
+                                                    <td>
+                                                        <SentimentBadge sentiment={fb.sentiment} />
+                                                    </td>
+                                                    <td>
+                                                        <TriageBadge priority={fb.triage} />
+                                                    </td>
+                                                    <td>
+                                                        <button
+                                                            onClick={() =>
+                                                                setSelectedRow(selectedRow?.id === fb.id ? null : fb)
+                                                            }
+                                                            style={{
+                                                                background: "var(--bg-secondary)",
+                                                                border: "1px solid var(--border-color)",
+                                                                borderRadius: 6,
+                                                                color: "var(--accent-primary)",
+                                                                cursor: "pointer",
+                                                                padding: "4px 8px",
+                                                                fontSize: 11,
+                                                                fontFamily: "inherit",
+                                                                display: "flex",
+                                                                alignItems: "center",
+                                                                gap: 3,
+                                                                transition: "all 0.2s",
+                                                            }}
+                                                        >
+                                                            <Info size={11} /> Detail
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                    </tbody>
+                                </table>
                             </div>
                         )}
                     </div>

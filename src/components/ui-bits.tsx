@@ -98,12 +98,12 @@ export function FilterSelect({
                 onChange={(e) => onChange(e.target.value)}
                 style={{
                     appearance: "none",
-                    background: "rgba(13, 21, 48, 0.8)",
+                    background: "rgba(13, 21, 48, 0.95)",
                     border: "1px solid var(--border-color)",
                     borderRadius: 8,
-                    color: "var(--text-secondary)",
+                    color: "var(--text-primary)",
                     fontSize: 12,
-                    fontWeight: 500,
+                    fontWeight: 600,
                     padding: "7px 32px 7px 12px",
                     cursor: "pointer",
                     outline: "none",
