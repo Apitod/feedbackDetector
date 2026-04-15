@@ -1,4 +1,5 @@
 "use client";
+import React from "react";
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import {
@@ -30,8 +31,10 @@ import {
     Loader2,
     Rocket,
     FileCheck2,
+    Telescope,
+    ShieldAlert,
 } from "lucide-react";
-import { FeedbackItem, AIAnalysis } from "@/lib/store";
+import { FeedbackItem, AIAnalysis, MarketAnalysis } from "@/lib/store";
 import { SentimentPieChart, SourceBarChart } from "@/components/charts";
 import { FilterSelect, RatingDisplay, SentimentBadge, SourceBadge, TriageBadge } from "@/components/ui-bits";
 
@@ -74,6 +77,14 @@ export default function DashboardPage() {
     const [isLive, setIsLive] = useState(true);
     const [analysisExpanded, setAnalysisExpanded] = useState(false);
     const [theme, setTheme] = useState<"light" | "dark">("light");
+    const [activeTab, setActiveTab] = useState<"internal" | "market">("internal");
+
+    // ─── Market Intelligence State ───────────────────────────────────────────────
+    const [marketAnalysis, setMarketAnalysis] = useState<MarketAnalysis | null>(null);
+    const [marketLoading, setMarketLoading] = useState(false);
+    const [marketTriggering, setMarketTriggering] = useState(false);
+    const [marketTriggerMsg, setMarketTriggerMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+    const [marketReportExpanded, setMarketReportExpanded] = useState(false);
 
     // ─── Offline Upload State ─────────────────────────────────────────────────
     const [showUploadModal, setShowUploadModal] = useState(false);
@@ -211,7 +222,43 @@ export default function DashboardPage() {
         }
     };
 
-    // ─── Fetch data ───────────────────────────────────────────────────────────
+    // ─── Fetch market analysis data ───────────────────────────────────────────
+    const fetchMarketData = useCallback(async (silent = false) => {
+        if (!silent) setMarketLoading(true);
+        try {
+            const res = await fetch("/api/market/analysis");
+            const data = await res.json();
+            setMarketAnalysis(data.data ?? null);
+        } catch (e) {
+            console.error("Gagal fetch market analysis:", e);
+        } finally {
+            setMarketLoading(false);
+        }
+    }, []);
+
+    // ─── Trigger market analysis ──────────────────────────────────────────────
+    const handleTriggerMarket = async () => {
+        setMarketTriggering(true);
+        setMarketTriggerMsg(null);
+        try {
+            const res = await fetch("/api/trigger-market", { method: "POST" });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                setMarketTriggerMsg({ type: "success", text: data.message });
+                setTimeout(() => fetchMarketData(true), 20000);
+                setTimeout(() => fetchMarketData(true), 60000);
+            } else {
+                setMarketTriggerMsg({ type: "error", text: data.message ?? "Gagal memicu analisis." });
+            }
+        } catch {
+            setMarketTriggerMsg({ type: "error", text: "Gagal terhubung ke server." });
+        } finally {
+            setMarketTriggering(false);
+        }
+    };
+
+    useEffect(() => { fetchMarketData(); }, [fetchMarketData]);
+
     const fetchData = useCallback(async (silent = false) => {
         if (!silent) setLoading(true);
         setRefreshing(true);
@@ -352,6 +399,46 @@ export default function DashboardPage() {
                                 Analisis Ulasan Pelanggan Real-Time
                             </p>
                         </div>
+                    </div>
+
+                    {/* ── Tab Navigation ── */}
+                    <div style={{ display: "flex", gap: 4, background: "var(--bg-secondary)", borderRadius: 12, padding: 4, border: "1px solid var(--border-color)" }}>
+                        <button
+                            id="tab-internal"
+                            onClick={() => setActiveTab("internal")}
+                            style={{
+                                display: "flex", alignItems: "center", gap: 7,
+                                padding: "7px 18px", borderRadius: 9,
+                                border: "none", cursor: "pointer",
+                                fontSize: 12, fontWeight: 700, fontFamily: "inherit",
+                                transition: "all 0.2s",
+                                background: activeTab === "internal"
+                                    ? "linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))"
+                                    : "transparent",
+                                color: activeTab === "internal" ? "white" : "var(--text-muted)",
+                                boxShadow: activeTab === "internal" ? "0 2px 10px rgba(99,102,241,0.4)" : "none",
+                            }}
+                        >
+                            <MessageSquare size={13} /> Feedback Internal
+                        </button>
+                        <button
+                            id="tab-market"
+                            onClick={() => setActiveTab("market")}
+                            style={{
+                                display: "flex", alignItems: "center", gap: 7,
+                                padding: "7px 18px", borderRadius: 9,
+                                border: "none", cursor: "pointer",
+                                fontSize: 12, fontWeight: 700, fontFamily: "inherit",
+                                transition: "all 0.2s",
+                                background: activeTab === "market"
+                                    ? "linear-gradient(135deg, #0891b2, #0d9488)"
+                                    : "transparent",
+                                color: activeTab === "market" ? "white" : "var(--text-muted)",
+                                boxShadow: activeTab === "market" ? "0 2px 10px rgba(8,145,178,0.4)" : "none",
+                            }}
+                        >
+                            <Telescope size={13} /> Market Intelligence
+                        </button>
                     </div>
 
                     {/* Controls */}
@@ -497,8 +584,8 @@ export default function DashboardPage() {
       `}</style>
 
             <main style={{ maxWidth: 1400, margin: "0 auto", padding: "28px 24px 0" }}>
-
-                {/* ── Stat Cards ── */}
+                {activeTab === "internal" && (
+                <React.Fragment>
                 <div
                     className="stagger-children"
                     style={{
@@ -1382,26 +1469,183 @@ export default function DashboardPage() {
                 )}
 
                 {/* ── n8n Integration Info Banner ── */}
-                <div
-                    style={{
-                        maxWidth: 1400,
-                        margin: "24px auto 0",
-                        padding: "0 24px",
-                    }}
-                >
-                    <div
-                        style={{
-                            background: "rgba(79,70,229,0.04)",
-                            border: "1px solid rgba(79,70,229,0.08)",
-                            borderRadius: 16,
-                            padding: "16px 24px",
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 6,
-                        }}
-                    >
+                <div style={{ maxWidth: 1400, margin: "24px auto 0", padding: "0 24px" }}>
+                    <div style={{ background: "rgba(79,70,229,0.04)", border: "1px solid rgba(79,70,229,0.08)", borderRadius: 16, padding: "16px 24px", display: "flex", flexDirection: "column", gap: 6 }}>
                     </div>
                 </div>
+                </React.Fragment>
+                )} {/* end activeTab === 'internal' */}
+
+                {/* ══════════════════════════════════════════════════════════════ */}
+                {/* ── Market Intelligence Tab ─────────────────────────────────── */}
+                {/* ══════════════════════════════════════════════════════════════ */}
+                {activeTab === "market" && (
+                <div style={{ animation: "fadeInUp 0.35s ease-out" }}>
+
+                    {/* Hero Header */}
+                    <div style={{
+                        marginBottom: 28,
+                        borderRadius: 20,
+                        overflow: "hidden",
+                        background: "linear-gradient(135deg, rgba(8,145,178,0.10) 0%, rgba(13,148,136,0.08) 50%, rgba(99,102,241,0.06) 100%)",
+                        border: "1px solid rgba(8,145,178,0.2)",
+                        padding: "32px 36px",
+                        position: "relative",
+                    }}>
+                        {/* Glow strip */}
+                        <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: "linear-gradient(90deg, #0891b2, #0d9488, #6366f1)" }} />
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 20 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+                                <div style={{
+                                    width: 60, height: 60, borderRadius: 16,
+                                    background: "linear-gradient(135deg, #0891b2, #0d9488)",
+                                    display: "flex", alignItems: "center", justifyContent: "center",
+                                    boxShadow: "0 8px 24px rgba(8,145,178,0.4)",
+                                }}>
+                                    <Telescope size={28} color="white" />
+                                </div>
+                                <div>
+                                    <h2 style={{ fontSize: 22, fontWeight: 800, color: "var(--text-primary)", lineHeight: 1.2 }}>
+                                        Market Intelligence
+                                    </h2>
+                                    <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 4 }}>
+                                        Tren kesehatan &amp; sentimen masyarakat dari TikTok, Instagram, Google Maps &amp; Facebook
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Trigger Button */}
+                            <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+                                {marketTriggerMsg && (
+                                    <div style={{
+                                        display: "flex", alignItems: "center", gap: 8,
+                                        padding: "9px 16px", borderRadius: 10,
+                                        background: marketTriggerMsg.type === "success" ? "rgba(8,145,178,0.1)" : "rgba(239,68,68,0.1)",
+                                        border: `1px solid ${marketTriggerMsg.type === "success" ? "rgba(8,145,178,0.3)" : "rgba(239,68,68,0.3)"}`,
+                                        color: marketTriggerMsg.type === "success" ? "#0891b2" : "#ef4444",
+                                        maxWidth: 340,
+                                    }}>
+                                        {marketTriggerMsg.type === "success" ? <CheckCircle2 size={14} style={{ flexShrink: 0 }} /> : <ShieldAlert size={14} style={{ flexShrink: 0 }} />}
+                                        <p style={{ fontSize: 12, fontWeight: 500 }}>{marketTriggerMsg.text}</p>
+                                    </div>
+                                )}
+                                <button
+                                    id="btn-start-market"
+                                    onClick={handleTriggerMarket}
+                                    disabled={marketTriggering}
+                                    style={{
+                                        display: "flex", alignItems: "center", gap: 10,
+                                        padding: "13px 30px", borderRadius: 14,
+                                        background: marketTriggering ? "var(--bg-secondary)" : "linear-gradient(135deg, #0891b2 0%, #0d9488 100%)",
+                                        border: marketTriggering ? "1px solid var(--border-color)" : "none",
+                                        cursor: marketTriggering ? "not-allowed" : "pointer",
+                                        fontSize: 14, fontWeight: 700, color: marketTriggering ? "var(--text-muted)" : "white",
+                                        fontFamily: "inherit",
+                                        boxShadow: marketTriggering ? "none" : "0 6px 24px rgba(8,145,178,0.45)",
+                                        transition: "all 0.2s",
+                                        letterSpacing: "0.02em",
+                                    }}>
+                                    {marketTriggering
+                                        ? <><Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> Menganalisis Pasar...</>
+                                        : <><Rocket size={16} /> 🚀 Mulai Analisis Market</>}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Platform source pills */}
+                    <div style={{ display: "flex", gap: 10, marginBottom: 24, flexWrap: "wrap" }}>
+                        {[
+                            { label: "TikTok", color: "#25f4ee", bg: "rgba(37,244,238,0.08)", border: "rgba(37,244,238,0.25)" },
+                            { label: "Instagram", color: "#e1306c", bg: "rgba(225,48,108,0.08)", border: "rgba(225,48,108,0.25)" },
+                            { label: "Google Maps", color: "#4285f4", bg: "rgba(66,133,244,0.08)", border: "rgba(66,133,244,0.25)" },
+                            { label: "Facebook", color: "#1877f2", bg: "rgba(24,119,242,0.08)", border: "rgba(24,119,242,0.25)" },
+                        ].map(p => (
+                            <span key={p.label} style={{
+                                display: "inline-flex", alignItems: "center", gap: 6,
+                                padding: "5px 14px", borderRadius: 999,
+                                fontSize: 12, fontWeight: 600,
+                                background: p.bg, color: p.color,
+                                border: `1px solid ${p.border}`,
+                            }}>
+                                <span style={{ width: 6, height: 6, borderRadius: "50%", background: p.color, display: "inline-block" }} />
+                                {p.label}
+                            </span>
+                        ))}
+                        {marketAnalysis && (
+                            <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--text-muted)" }}>
+                                <Clock size={11} /> Diperbarui: {new Date(marketAnalysis.generatedAt).toLocaleString("id-ID")}
+                            </span>
+                        )}
+                    </div>
+
+                    {/* Market AI Report Card */}
+                    <div className="glass-card" style={{ padding: 0, overflow: "hidden", marginBottom: 24 }}>
+                        {/* Card Header */}
+                        <div
+                            style={{
+                                padding: "20px 28px",
+                                borderBottom: marketAnalysis && marketReportExpanded ? "1px solid rgba(8,145,178,0.2)" : "none",
+                                display: "flex", alignItems: "center", justifyContent: "space-between",
+                                cursor: "pointer", userSelect: "none",
+                                background: "linear-gradient(135deg, rgba(8,145,178,0.04) 0%, rgba(13,148,136,0.03) 100%)",
+                            }}
+                            onClick={() => setMarketReportExpanded(v => !v)}
+                        >
+                            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                                <div style={{
+                                    width: 38, height: 38, borderRadius: 11,
+                                    background: "linear-gradient(135deg, #0891b2, #0d9488)",
+                                    display: "flex", alignItems: "center", justifyContent: "center",
+                                    boxShadow: "0 4px 14px rgba(8,145,178,0.35)",
+                                }}>
+                                    <Bot size={18} color="white" />
+                                </div>
+                                <div>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                        <h3 style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)" }}>Laporan AI Market Intelligence</h3>
+                                        <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 99, background: "rgba(8,145,178,0.1)", color: "#0891b2", border: "1px solid rgba(8,145,178,0.2)", letterSpacing: "0.05em" }}>GPT-4o-mini</span>
+                                    </div>
+                                    <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
+                                        {marketLoading ? "Memuat laporan..." : marketAnalysis ? `Analisis dari ${marketAnalysis.commentCount || "?"} komentar sosial media` : "Belum ada laporan market — klik tombol di atas untuk mulai"}
+                                    </p>
+                                </div>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                {marketAnalysis && (
+                                    <div style={{ display: "flex", gap: 4 }}>
+                                        {(marketAnalysis.platforms || []).map(pl => <SourceBadge key={pl} source={pl} />)}
+                                    </div>
+                                )}
+                                <div style={{ width: 28, height: 28, borderRadius: 8, background: "rgba(8,145,178,0.1)", display: "flex", alignItems: "center", justifyContent: "center", color: "#0891b2" }}>
+                                    {marketReportExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Card Body */}
+                        {marketReportExpanded && (
+                            <div style={{ padding: 28 }}>
+                                {marketLoading ? (
+                                    <div style={{ textAlign: "center", padding: "40px 0", color: "var(--text-muted)" }}>
+                                        <Loader2 size={32} style={{ margin: "0 auto 12px", opacity: 0.4, animation: "spin 1s linear infinite", display: "block" }} />
+                                        <p style={{ fontSize: 14 }}>Memuat laporan market...</p>
+                                    </div>
+                                ) : !marketAnalysis ? (
+                                    <div style={{ textAlign: "center", padding: "40px 0", color: "var(--text-muted)" }}>
+                                        <Telescope size={42} style={{ margin: "0 auto 12px", opacity: 0.2, display: "block" }} />
+                                        <p style={{ fontSize: 14, marginBottom: 6 }}>Belum ada data market intelligence.</p>
+                                        <p style={{ fontSize: 12 }}>Klik tombol "Mulai Analisis Market" untuk memulai scraping &amp; analisis.</p>
+                                    </div>
+                                ) : (
+                                    <MarketReportRenderer report={marketAnalysis.report} />
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+                )} {/* end activeTab === 'market' */}
+
             </main>
         </div>
     );
@@ -1605,6 +1849,101 @@ function parseAIReport(report: string): { title: string; content: string }[] {
         if (content) {
             results.push({ title: section, content });
         }
+    }
+
+    return results;
+}
+
+// ─── Market Report Renderer ────────────────────────────────────────────────────
+// Renders the market intelligence AI report with teal/cyan sections
+function MarketReportRenderer({ report }: { report: string }) {
+    const sections = parseMarketReport(report);
+
+    const sectionConfig: Record<string, { icon: React.ReactNode; color: string; bg: string; border: string }> = {
+        "KEY INSIGHTS": {
+            icon: <TrendingUp size={14} />,
+            color: "#0891b2",
+            bg: "rgba(8,145,178,0.06)",
+            border: "rgba(8,145,178,0.2)",
+        },
+        "THREATS & OPPORTUNITIES": {
+            icon: <ShieldAlert size={14} />,
+            color: "#f59e0b",
+            bg: "rgba(245,158,11,0.06)",
+            border: "rgba(245,158,11,0.2)",
+        },
+        "REKOMENDASI STRATEGIS": {
+            icon: <Zap size={14} />,
+            color: "#0d9488",
+            bg: "linear-gradient(135deg, rgba(8,145,178,0.10), rgba(13,148,136,0.08))",
+            border: "rgba(13,148,136,0.3)",
+        },
+    };
+
+    if (sections.length === 0) {
+        return (
+            <pre style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.7, whiteSpace: "pre-wrap", fontFamily: "inherit", margin: 0 }}>
+                {report}
+            </pre>
+        );
+    }
+
+    return (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 14 }}>
+            {sections.map(({ title, content }) => {
+                const cfg = sectionConfig[title] ?? { icon: <Bot size={14} />, color: "#0891b2", bg: "rgba(8,145,178,0.06)", border: "rgba(8,145,178,0.2)" };
+                const isRekomendasi = title === "REKOMENDASI STRATEGIS";
+                return (
+                    <div key={title} style={{
+                        background: cfg.bg,
+                        border: `1.5px solid ${cfg.border}`,
+                        borderRadius: isRekomendasi ? 16 : 12,
+                        padding: isRekomendasi ? 24 : 18,
+                        gridColumn: isRekomendasi ? "1 / -1" : undefined,
+                        position: "relative",
+                        overflow: "hidden",
+                        boxShadow: isRekomendasi ? "0 4px 24px rgba(13,148,136,0.12)" : undefined,
+                    }}>
+                        {isRekomendasi && (
+                            <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: "linear-gradient(90deg, #0891b2, #0d9488, #6366f1)" }} />
+                        )}
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: isRekomendasi ? 14 : 10, color: cfg.color }}>
+                            {cfg.icon}
+                            <span style={{ fontSize: isRekomendasi ? 12 : 11, fontWeight: 800, letterSpacing: "0.07em", textTransform: "uppercase", color: cfg.color }}>
+                                {title}
+                            </span>
+                            {isRekomendasi && (
+                                <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99, background: "rgba(13,148,136,0.15)", border: "1px solid rgba(13,148,136,0.3)", color: "#0d9488", letterSpacing: "0.05em" }}>
+                                    ★ AKSI STRATEGIS
+                                </span>
+                            )}
+                        </div>
+                        <div style={{ fontSize: isRekomendasi ? 14 : 13, color: "var(--text-secondary)", lineHeight: 1.8, whiteSpace: "pre-wrap", fontWeight: isRekomendasi ? 500 : undefined }}>
+                            {content}
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+function parseMarketReport(report: string): { title: string; content: string }[] {
+    const knownSections = ["KEY INSIGHTS", "THREATS & OPPORTUNITIES", "REKOMENDASI STRATEGIS"];
+    const results: { title: string; content: string }[] = [];
+    let remaining = report;
+
+    for (let i = 0; i < knownSections.length; i++) {
+        const section = knownSections[i];
+        const nextSection = knownSections[i + 1];
+        const startIdx = remaining.indexOf(section + ":");
+        if (startIdx === -1) continue;
+
+        const contentStart = startIdx + section.length + 1;
+        const nextIdx = nextSection ? remaining.indexOf(nextSection + ":") : remaining.length;
+        const content = remaining.slice(contentStart, nextIdx === -1 ? undefined : nextIdx).trim();
+
+        if (content) results.push({ title: section, content });
     }
 
     return results;

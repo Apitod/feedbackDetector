@@ -22,12 +22,24 @@ export interface AIAnalysis {
     sources: string[];       // Platform yang disertakan
 }
 
+// ─── Market Intelligence Store ────────────────────────────────────────────────
+// Laporan analisis pasar dari sosmed scraping (TikTok, IG, Maps, FB)
+export interface MarketAnalysis {
+    id: string;
+    report: string;       // Full market intelligence report dari AI
+    generatedAt: string;  // ISO timestamp
+    commentCount: number; // Jumlah komentar sosmed yang dianalisis
+    platforms: string[];  // Platform yang di-scrape
+}
+
 // Global store bertahan selama server process berjalan
 declare global {
     // eslint-disable-next-line no-var
     var feedbackStore: FeedbackItem[] | undefined;
     // eslint-disable-next-line no-var
     var aiAnalysisStore: AIAnalysis[] | undefined;
+    // eslint-disable-next-line no-var
+    var marketAnalysisStore: MarketAnalysis[] | undefined;
 }
 
 if (!global.feedbackStore) {
@@ -38,8 +50,13 @@ if (!global.aiAnalysisStore) {
     global.aiAnalysisStore = [];
 }
 
+if (!global.marketAnalysisStore) {
+    global.marketAnalysisStore = [];
+}
+
 export const feedbackStore = global.feedbackStore;
 export const aiAnalysisStore = global.aiAnalysisStore;
+export const marketAnalysisStore = global.marketAnalysisStore;
 
 export function addFeedback(item: Omit<FeedbackItem, "id" | "createdAt">): FeedbackItem {
     const newItem: FeedbackItem = {
@@ -114,4 +131,27 @@ export function getStats() {
         dominantSentiment,
         dominantSource,
     };
+}
+
+// ─── Market Intelligence CRUD ─────────────────────────────────────────────────
+export function addMarketAnalysis(
+    item: Omit<MarketAnalysis, "id">
+): MarketAnalysis {
+    const newItem: MarketAnalysis = {
+        ...item,
+        id: `mkt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    };
+    global.marketAnalysisStore!.unshift(newItem);
+    if (global.marketAnalysisStore!.length > 10) {
+        global.marketAnalysisStore = global.marketAnalysisStore!.slice(0, 10);
+    }
+    return newItem;
+}
+
+export function getLatestMarketAnalysis(): MarketAnalysis | null {
+    return global.marketAnalysisStore?.[0] ?? null;
+}
+
+export function getAllMarketAnalyses(): MarketAnalysis[] {
+    return global.marketAnalysisStore ?? [];
 }

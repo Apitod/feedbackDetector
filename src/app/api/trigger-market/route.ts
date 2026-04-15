@@ -1,7 +1,6 @@
-// app/api/trigger-analysis/route.ts
-// Endpoint yang menjadi "tombol mulai" untuk memicu workflow n8n secara manual.
-// Mengirimkan data offline (bisa kosong []) ke webhook Internal Feedback n8n.
-// Webhook n8n: /start-internal-feedback
+// app/api/trigger-market/route.ts
+// Endpoint "tombol mulai" untuk Market Intelligence.
+// Menembak webhook n8n yang menjalankan scraping TikTok, IG, Maps, FB.
 
 import { NextRequest, NextResponse } from "next/server";
 
@@ -10,40 +9,30 @@ const CORS_HEADERS = {
     "Cache-Control": "no-cache",
 };
 
-// URL Webhook n8n Internal Feedback.
-const N8N_TRIGGER_WEBHOOK_URL =
-    process.env.N8N_INTERNAL_WEBHOOK_URL ||
-    process.env.N8N_TRIGGER_WEBHOOK_URL ||
-    "https://hyperthermal-admirative-luella.ngrok-free.dev/webhook/start-internal-feedback";
+const N8N_MARKET_WEBHOOK_URL =
+    process.env.N8N_MARKET_WEBHOOK_URL ||
+    "https://hyperthermal-admirative-luella.ngrok-free.dev/webhook/start-market-analysis";
 
-// ─── POST: Trigger n8n workflow + kirim data offline ─────────────────────────
-// Expected body: Array<{ namaPetugas, isiKeluhan, tanggal }> — boleh kosong []
-export async function POST(req: NextRequest) {
+// ─── POST: Trigger n8n market workflow ───────────────────────────────────────
+export async function POST(_req: NextRequest) {
     try {
-        const body = await req.json();
-
-        // Terima array data offline (kosong pun tidak masalah)
-        const offlineData = Array.isArray(body) ? body : [];
-
         console.log(
-            `[POST /api/trigger-analysis] Memicu n8n dengan ${offlineData.length} data offline.`
+            `[POST /api/trigger-market] Memicu n8n market webhook: ${N8N_MARKET_WEBHOOK_URL}`
         );
 
-        // ─── Kirim ke n8n Webhook ─────────────────────────────────────────────
         let n8nResponse: Response;
         try {
-            n8nResponse = await fetch(N8N_TRIGGER_WEBHOOK_URL, {
+            n8nResponse = await fetch(N8N_MARKET_WEBHOOK_URL, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     triggeredAt: new Date().toISOString(),
-                    offlineData,
-                    offlineDataCount: offlineData.length,
+                    source: "dashboard",
                 }),
                 signal: AbortSignal.timeout(30000),
             });
         } catch (fetchErr) {
-            console.error("[POST /api/trigger-analysis] Gagal terhubung ke n8n:", fetchErr);
+            console.error("[POST /api/trigger-market] Gagal terhubung ke n8n:", fetchErr);
             return NextResponse.json(
                 {
                     success: false,
@@ -57,7 +46,7 @@ export async function POST(req: NextRequest) {
 
         const n8nText = await n8nResponse.text();
         console.log(
-            `[POST /api/trigger-analysis] n8n responded ${n8nResponse.status}: ${n8nText.slice(0, 200)}`
+            `[POST /api/trigger-market] n8n responded ${n8nResponse.status}: ${n8nText.slice(0, 200)}`
         );
 
         if (!n8nResponse.ok) {
@@ -74,16 +63,16 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
             {
                 success: true,
-                message: `Analisis dimulai! n8n sedang memproses${offlineData.length > 0 ? ` ${offlineData.length} data offline +` : ""} data online.`,
-                offlineDataCount: offlineData.length,
+                message:
+                    "Analisis market dimulai! n8n sedang melakukan scraping sosial media & menganalisis tren.",
             },
             { status: 200, headers: CORS_HEADERS }
         );
     } catch (err) {
-        console.error("[POST /api/trigger-analysis]", err);
+        console.error("[POST /api/trigger-market]", err);
         return NextResponse.json(
-            { success: false, message: "Format data tidak valid atau terjadi kesalahan server." },
-            { status: 400, headers: CORS_HEADERS }
+            { success: false, message: "Terjadi kesalahan server." },
+            { status: 500, headers: CORS_HEADERS }
         );
     }
 }
