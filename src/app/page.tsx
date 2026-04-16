@@ -136,7 +136,7 @@ export default function DashboardPage() {
             h.findIndex((x) => candidates.some((c) => x.includes(c)));
 
         const colNama = findCol(headers, "nama", "petugas", "officer");
-        const colKeluhan = findCol(headers, "keluhan", "komentar", "comment", "isi", "text");
+        const colKeluhan = findCol(headers, "keluhan", "komentar", "comment", "isi", "text", "ulasan");
         const colTanggal = findCol(headers, "tanggal", "date", "waktu", "time");
 
         if (colKeluhan === -1) {
