@@ -53,24 +53,37 @@ export async function POST(req: NextRequest) {
             JSON.stringify(body).slice(0, 500)
         );
 
-        // n8n AI Agent biasanya mengirim field "output" (plain text atau JSON string)
-        const rawReport =
-            body.report ||
-            body.output ||
-            body.text ||
-            body.response ||
-            body.answer ||
-            "";
+        // ── Toleransi format body dari n8n ─────────────────────────────────
+        // Kasus 1: body adalah string mentah (n8n mengirim raw AI output)
+        // Kasus 2: body adalah object { output: "...", commentCount, platforms }
+        // Kasus 3: body adalah object { report: "...", commentCount, platforms }
+        let rawReport: string = "";
+        let bodyMeta = body;
 
-        if (!rawReport || typeof rawReport !== "string" || rawReport.trim() === "") {
+        if (typeof body === "string") {
+            // n8n mengirim raw string sebagai body (bukan object)
+            rawReport = body.trim();
+            bodyMeta = {}; // tidak ada metadata
+        } else {
+            rawReport = (
+                body.report ||
+                body.output ||
+                body.text ||
+                body.response ||
+                body.answer ||
+                ""
+            );
+        }
+
+        if (!rawReport || rawReport.trim() === "") {
             console.log(
-                "[POST /api/market/analysis] Report kosong. Keys:",
-                Object.keys(body)
+                "[POST /api/market/analysis] Report kosong. Type:", typeof body,
+                "Keys:", typeof body === "object" ? Object.keys(body) : "N/A (string)"
             );
             return NextResponse.json(
                 {
                     success: false,
-                    message: `Field 'report' atau 'output' wajib diisi. Keys diterima: ${Object.keys(body).join(", ")}`,
+                    message: `Field 'report' atau 'output' wajib diisi. Type diterima: ${typeof body}`,
                 },
                 { status: 400, headers: CORS_HEADERS }
             );
@@ -99,18 +112,42 @@ export async function POST(req: NextRequest) {
 
         // Toleran terhadap berbagai format jumlah komentar
         const commentCount =
-            typeof body.commentCount === "number"
-                ? body.commentCount
-                : typeof body.commentCount === "string"
-                ? parseInt(body.commentCount, 10) || 0
+            typeof (bodyMeta as Record<string, unknown>).commentCount === "number"
+                ? (bodyMeta as Record<string, unknown>).commentCount as number
+                : typeof (bodyMeta as Record<string, unknown>).commentCount === "string"
+                ? parseInt((bodyMeta as Record<string, unknown>).commentCount as string, 10) || 0
                 : 0;
 
         // Toleran terhadap array atau comma-separated string
         let platforms: string[] = [];
-        if (Array.isArray(body.platforms)) {
-            platforms = body.platforms;
-        } else if (typeof body.platforms === "string" && body.platforms.trim()) {
-            platforms = body.platforms.split(",").map((s: string) => s.trim()).filter(Boolean);
+        const bodyPlatforms = (bodyMeta as Record<string, unknown>).platforms;
+        if (Array.isArray(bodyPlatforms)) {
+            platforms = bodyPlatforms as string[];
+        } else if (typeof bodyPlatforms === "string" && bodyPlatforms.trim()) {
+            platforms = bodyPlatforms.split(",").map((s: string) => s.trim()).filter(Boolean);
+        }
+
+        // ── Extract analyzed_comments (array dari AI per-comment analysis) ──────
+        // n8n mengirim sebagai: { ..., analyzed_comments: [{comment, sentiment, topic}] }
+        // Bisa juga tersimpan di dalam JSON-parsed AI output
+        let analyzedComments: { comment: string; sentiment: string; topic: string }[] = [];
+        const rawComments = (bodyMeta as Record<string, unknown>).analyzed_comments;
+        if (Array.isArray(rawComments)) {
+            analyzedComments = rawComments as { comment: string; sentiment: string; topic: string }[];
+        } else {
+            // Coba ekstrak dari parsed JSON jika belum ditemukan di body langsung
+            try {
+                const jsonMatch = rawReport.match(/```json\s*([\s\S]*?)\s*```/);
+                const jsonString = jsonMatch
+                    ? jsonMatch[1]
+                    : rawReport.trim().startsWith("{") ? rawReport : null;
+                if (jsonString) {
+                    const parsed = JSON.parse(jsonString);
+                    if (Array.isArray(parsed.analyzed_comments)) {
+                        analyzedComments = parsed.analyzed_comments;
+                    }
+                }
+            } catch { /* tetap kosong */ }
         }
 
         const saved = addMarketAnalysis({
@@ -118,6 +155,7 @@ export async function POST(req: NextRequest) {
             generatedAt: new Date().toISOString(),
             commentCount,
             platforms,
+            analyzed_comments: analyzedComments,
         });
 
         return NextResponse.json(

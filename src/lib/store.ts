@@ -30,6 +30,7 @@ export interface MarketAnalysis {
     generatedAt: string;  // ISO timestamp
     commentCount: number; // Jumlah komentar sosmed yang dianalisis
     platforms: string[];  // Platform yang di-scrape
+    analyzed_comments?: { comment: string; sentiment: string; topic: string }[]; // Per-comment AI analysis
 }
 
 // Global store bertahan selama server process berjalan

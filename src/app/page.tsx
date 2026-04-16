@@ -83,7 +83,6 @@ export default function DashboardPage() {
 
     // ─── Market Intelligence State ───────────────────────────────────────────────
     const [marketAnalysis, setMarketAnalysis] = useState<MarketAnalysis | null>(null);
-    const [marketLoading, setMarketLoading] = useState(false);
     const [marketTriggering, setMarketTriggering] = useState(false);
     const [marketTriggerMsg, setMarketTriggerMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
     const [marketReportExpanded, setMarketReportExpanded] = useState(false);
@@ -163,8 +162,6 @@ export default function DashboardPage() {
         setUploadFile(null);
         setParsedRows([]);
         setParseError(null);
-        setUploadStatus("idle");
-        setUploadMessage("");
 
         if (!file.name.endsWith(".csv")) {
             setParseError("Hanya file .csv yang diterima.");
@@ -224,20 +221,6 @@ export default function DashboardPage() {
         }
     };
 
-    // ─── Fetch market analysis data ───────────────────────────────────────────
-    const fetchMarketData = useCallback(async (silent = false) => {
-        if (!silent) setMarketLoading(true);
-        try {
-            const res = await fetch("/api/market/analysis");
-            const data = await res.json();
-            setMarketAnalysis(data.data ?? null);
-        } catch (e) {
-            console.error("Gagal fetch market analysis:", e);
-        } finally {
-            setMarketLoading(false);
-        }
-    }, []);
-
     // ─── Trigger market analysis ──────────────────────────────────────────────
     const handleTriggerMarket = async () => {
         setMarketTriggering(true);
@@ -247,8 +230,8 @@ export default function DashboardPage() {
             const data = await res.json();
             if (res.ok && data.success) {
                 setMarketTriggerMsg({ type: "success", text: data.message });
-                setTimeout(() => fetchMarketData(true), 20000);
-                setTimeout(() => fetchMarketData(true), 60000);
+                setTimeout(() => fetchData(true), 20000);
+                setTimeout(() => fetchData(true), 60000);
             } else {
                 setMarketTriggerMsg({ type: "error", text: data.message ?? "Gagal memicu analisis." });
             }
@@ -259,14 +242,12 @@ export default function DashboardPage() {
         }
     };
 
-    useEffect(() => { fetchMarketData(); }, [fetchMarketData]);
-
     const fetchData = useCallback(async (silent = false) => {
         if (!silent) setLoading(true);
         setRefreshing(true);
         try {
             const params = new URLSearchParams();
-            
+
             // Pilih filter berdasarkan tab aktif
             const currentSource = activeTab === "internal" ? filterSource : marketFilterSource;
             const currentSentiment = activeTab === "internal" ? filterSentiment : marketFilterSentiment;
@@ -274,19 +255,25 @@ export default function DashboardPage() {
             if (currentSource !== "semua") params.append("source", currentSource);
             if (currentSentiment !== "semua") params.append("sentiment", currentSentiment);
 
-            const [fbRes, statsRes, analysisRes] = await Promise.all([
+            // Fetch data internal & market analysis secara paralel
+            const [fbRes, statsRes, analysisRes, marketRes] = await Promise.all([
                 fetch(`/api/feedback?${params.toString()}`),
                 fetch("/api/feedback/stats"),
                 fetch("/api/feedback/analysis"),
+                fetch("/api/market/analysis"),
             ]);
 
-            const fbData = await fbRes.json();
-            const statsData = await statsRes.json();
-            const analysisData = await analysisRes.json();
+            const [fbData, statsData, analysisData, marketData] = await Promise.all([
+                fbRes.json(),
+                statsRes.json(),
+                analysisRes.json(),
+                marketRes.json(),
+            ]);
 
             setFeedbacks(fbData.data ?? []);
             setStats(statsData.data ?? null);
             setAiAnalysis(analysisData.data ?? null);
+            setMarketAnalysis(marketData.data ?? null);
             setLastUpdated(new Date());
         } catch (e) {
             console.error("Gagal mengambil data:", e);
@@ -296,9 +283,19 @@ export default function DashboardPage() {
         }
     }, [activeTab, filterSource, filterSentiment, marketFilterSource, marketFilterSentiment]);
 
+    // ─── Fetch on mount & whenever filters/tab change ─────────────────────────
     useEffect(() => {
         fetchData();
     }, [fetchData]);
+
+    // ─── Fetch fresh market data setiap kali user pindah ke tab market ─────────
+    useEffect(() => {
+        if (activeTab === "market") {
+            fetchData(true);
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeTab]);
+
 
     // ─── Auto-refresh every 30s ───────────────────────────────────────────────
     useEffect(() => {
@@ -1607,7 +1604,7 @@ export default function DashboardPage() {
                                         <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 99, background: "rgba(8,145,178,0.1)", color: "#0891b2", border: "1px solid rgba(8,145,178,0.2)", letterSpacing: "0.05em" }}>GPT-4o-mini</span>
                                     </div>
                                     <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
-                                        {marketLoading ? "Memuat laporan..." : marketAnalysis ? `Analisis dari ${marketAnalysis.commentCount || "?"} komentar sosial media` : "Belum ada laporan market — klik tombol di atas untuk mulai"}
+                                        {refreshing ? "Memuat laporan..." : marketAnalysis ? `Analisis dari ${marketAnalysis.commentCount || "?"} komentar sosial media` : "Belum ada laporan market — klik tombol di atas untuk mulai"}
                                     </p>
                                 </div>
                             </div>
@@ -1626,7 +1623,7 @@ export default function DashboardPage() {
                         {/* Card Body */}
                         {marketReportExpanded && (
                             <div style={{ padding: 28 }}>
-                                {marketLoading ? (
+                                {refreshing ? (
                                     <div style={{ textAlign: "center", padding: "40px 0", color: "var(--text-muted)" }}>
                                         <Loader2 size={32} style={{ margin: "0 auto 12px", opacity: 0.4, animation: "spin 1s linear infinite", display: "block" }} />
                                         <p style={{ fontSize: 14 }}>Memuat laporan market...</p>
@@ -1643,149 +1640,83 @@ export default function DashboardPage() {
                             </div>
                         )}
                     </div>
-                    {/* Data Table Market */}
+                    {/* ── Tabel Data Ulasan Hasil Analisis AI ── */}
                     <div className="glass-card" style={{ padding: 24, border: "1px solid rgba(8,145,178,0.15)" }}>
                         {/* Table header */}
-                        <div
-                            style={{
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "space-between",
-                                marginBottom: 16,
-                                flexWrap: "wrap",
-                                gap: 12,
-                            }}
-                        >
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                <Table2 size={16} color="#0891b2" />
-                                <h2 style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>
-                                    Data Ulasan Market Intelligence
-                                </h2>
-                                <span
-                                    style={{
-                                        fontSize: 11,
-                                        background: "rgba(8,145,178,0.06)",
-                                        color: "#0891b2",
-                                        padding: "2px 8px",
-                                        borderRadius: 99,
-                                        fontWeight: 600,
-                                        border: "1px solid rgba(8,145,178,0.2)",
-                                    }}
-                                >
-                                    {feedbacks.filter(f => ["tiktok", "instagram", "facebook"].includes(f.source)).length} hasil
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                <div style={{ width: 32, height: 32, borderRadius: 9, background: "linear-gradient(135deg, #0891b2, #0d9488)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                    <Table2 size={15} color="white" />
+                                </div>
+                                <div>
+                                    <h2 style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", lineHeight: 1.2 }}>
+                                        Data Komentar Hasil Analisis AI
+                                    </h2>
+                                    <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>Per-komentar dari TikTok, Instagram, Facebook &amp; Google Maps</p>
+                                </div>
+                                <span style={{ fontSize: 11, background: "rgba(8,145,178,0.06)", color: "#0891b2", padding: "2px 10px", borderRadius: 99, fontWeight: 600, border: "1px solid rgba(8,145,178,0.2)" }}>
+                                    {(marketAnalysis?.analyzed_comments ?? []).length} komentar
                                 </span>
-                            </div>
-
-                            {/* Filters */}
-                            <div style={{ display: "flex", gap: 8 }}>
-                                <FilterSelect
-                                    value={marketFilterSource}
-                                    onChange={setMarketFilterSource}
-                                    options={[
-                                        { value: "semua", label: "Semua Platform Market" },
-                                        { value: "instagram", label: "Instagram" },
-                                        { value: "tiktok", label: "TikTok" },
-                                        { value: "facebook", label: "Facebook" },
-                                    ]}
-                                />
-                                <FilterSelect
-                                    value={marketFilterSentiment}
-                                    onChange={setMarketFilterSentiment}
-                                    options={[
-                                        { value: "semua", label: "Semua Sentimen" },
-                                        { value: "positif", label: "Positif" },
-                                        { value: "netral", label: "Netral" },
-                                        { value: "negatif", label: "Negatif" },
-                                    ]}
-                                />
                             </div>
                         </div>
 
-                        {/* Table */}
-                        {loading ? (
-                            <div style={{ textAlign: "center", padding: "48px 0", color: "var(--text-muted)" }}>
-                                <div style={{ fontSize: 13 }}>Memuat data ulasan...</div>
-                            </div>
-                        ) : feedbacks.filter(f => ["tiktok", "instagram", "facebook"].includes(f.source)).length === 0 ? (
-                            <div style={{ textAlign: "center", padding: "48px 0", color: "var(--text-muted)" }}>
-                                <MessageSquare size={32} style={{ margin: "0 auto 12px", opacity: 0.2, display: "block" }} />
-                                <p style={{ fontSize: 14 }}>Belum ada data ulasan market.</p>
-                                <p style={{ fontSize: 12, marginTop: 4 }}>Klik "Mulai Analisis Market" untuk mengambil data.</p>
+                        {/* Table body */}
+                        {!marketAnalysis || !marketAnalysis.analyzed_comments || marketAnalysis.analyzed_comments.length === 0 ? (
+                            <div style={{ textAlign: "center", padding: "52px 0", color: "var(--text-muted)" }}>
+                                <MessageSquare size={36} style={{ margin: "0 auto 14px", opacity: 0.18, display: "block" }} />
+                                <p style={{ fontSize: 14, fontWeight: 600 }}>Belum ada data komentar teranalisis.</p>
+                                <p style={{ fontSize: 12, marginTop: 6 }}>Klik <strong style={{ color: "#0891b2" }}>Mulai Analisis Market</strong> untuk mengambil &amp; menganalisis komentar sosial media.</p>
                             </div>
                         ) : (
                             <div style={{ overflowX: "auto" }}>
                                 <table className="data-table">
                                     <thead>
                                         <tr>
-                                            <th>Platform</th>
+                                            <th style={{ width: 32 }}>#</th>
                                             <th>Komentar</th>
-                                            <th>Tanggal</th>
-                                            <th>Rating</th>
-                                            <th>Sentimen</th>
-                                            <th>Skala Prioritas</th>
-                                            <th></th>
+                                            <th style={{ width: 110 }}>Sentimen</th>
+                                            <th style={{ width: 160 }}>Topik</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {feedbacks
-                                            .filter(f => ["tiktok", "instagram", "facebook"].includes(f.source))
-                                            .map((fb) => (
-                                                <tr key={fb.id}>
-                                                    <td>
-                                                        <SourceBadge source={fb.source} />
-                                                    </td>
-                                                    <td style={{ maxWidth: 300 }}>
-                                                        <p
-                                                            style={{
-                                                                color: "var(--text-primary)",
-                                                                fontSize: 13,
-                                                                lineHeight: 1.5,
-                                                                display: "-webkit-box",
-                                                                WebkitLineClamp: 2,
-                                                                WebkitBoxOrient: "vertical",
-                                                                overflow: "hidden",
-                                                            }}
-                                                        >
-                                                            {fb.comment}
-                                                        </p>
-                                                    </td>
-                                                    <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>
-                                                        {formatDate(fb.date)}
-                                                    </td>
-                                                    <td>
-                                                        <RatingDisplay rating={fb.rating} />
-                                                    </td>
-                                                    <td>
-                                                        <SentimentBadge sentiment={fb.sentiment} />
-                                                    </td>
-                                                    <td>
-                                                        <TriageBadge priority={fb.triage} />
-                                                    </td>
-                                                    <td>
-                                                        <button
-                                                            onClick={() =>
-                                                                setSelectedRow(selectedRow?.id === fb.id ? null : fb)
-                                                            }
-                                                            style={{
-                                                                background: "var(--bg-secondary)",
-                                                                border: "1px solid var(--border-color)",
-                                                                borderRadius: 6,
-                                                                color: "var(--accent-primary)",
-                                                                cursor: "pointer",
-                                                                padding: "4px 8px",
-                                                                fontSize: 11,
-                                                                fontFamily: "inherit",
-                                                                display: "flex",
-                                                                alignItems: "center",
-                                                                gap: 3,
-                                                                transition: "all 0.2s",
-                                                            }}
-                                                        >
-                                                            <Info size={11} /> Detail
-                                                        </button>
-                                                    </td>
-                                                </tr>
-                                            ))}
+                                        {marketAnalysis.analyzed_comments.map((row, idx) => (
+                                            <tr key={idx}>
+                                                <td style={{ color: "var(--text-muted)", fontSize: 12, fontWeight: 600 }}>
+                                                    {idx + 1}
+                                                </td>
+                                                <td style={{ maxWidth: 420 }}>
+                                                    <p style={{
+                                                        color: "var(--text-primary)",
+                                                        fontSize: 13,
+                                                        lineHeight: 1.55,
+                                                        display: "-webkit-box",
+                                                        WebkitLineClamp: 3,
+                                                        WebkitBoxOrient: "vertical",
+                                                        overflow: "hidden",
+                                                    }}>
+                                                        {row.comment}
+                                                    </p>
+                                                </td>
+                                                <td>
+                                                    <SentimentBadge sentiment={row.sentiment as "positif" | "negatif" | "netral" | undefined} />
+                                                </td>
+                                                <td>
+                                                    <span style={{
+                                                        display: "inline-block",
+                                                        padding: "3px 10px",
+                                                        borderRadius: 99,
+                                                        fontSize: 11,
+                                                        fontWeight: 600,
+                                                        background: "rgba(8,145,178,0.08)",
+                                                        color: "#0891b2",
+                                                        border: "1px solid rgba(8,145,178,0.2)",
+                                                        whiteSpace: "nowrap",
+                                                    }}>
+                                                        {row.topic}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        ))}
                                     </tbody>
                                 </table>
                             </div>
@@ -2020,6 +1951,19 @@ function MarketReportRenderer({ report }: { report: string }) {
             bg: "rgba(245,158,11,0.06)",
             border: "rgba(245,158,11,0.2)",
         },
+        "REKOMENDASI PENINGKATAN LAYANAN": {
+            icon: <Zap size={14} />,
+            color: "#0d9488",
+            bg: "linear-gradient(135deg, rgba(8,145,178,0.10), rgba(13,148,136,0.08))",
+            border: "rgba(13,148,136,0.3)",
+        },
+        "REKOMENDASI PENINGKATAN MARKETING": {
+            icon: <Sparkles size={14} />,
+            color: "#6366f1",
+            bg: "linear-gradient(135deg, rgba(99,102,241,0.08), rgba(139,92,246,0.06))",
+            border: "rgba(99,102,241,0.3)",
+        },
+        // ← legacy header kept for backward-compat
         "REKOMENDASI STRATEGIS": {
             icon: <Zap size={14} />,
             color: "#0d9488",
@@ -2040,7 +1984,9 @@ function MarketReportRenderer({ report }: { report: string }) {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 14 }}>
             {sections.map(({ title, content }) => {
                 const cfg = sectionConfig[title] ?? { icon: <Bot size={14} />, color: "#0891b2", bg: "rgba(8,145,178,0.06)", border: "rgba(8,145,178,0.2)" };
-                const isRekomendasi = title === "REKOMENDASI STRATEGIS";
+                const isRekomendasi = title === "REKOMENDASI STRATEGIS"
+                    || title === "REKOMENDASI PENINGKATAN LAYANAN"
+                    || title === "REKOMENDASI PENINGKATAN MARKETING";
                 return (
                     <div key={title} style={{
                         background: cfg.bg,
@@ -2053,7 +1999,7 @@ function MarketReportRenderer({ report }: { report: string }) {
                         boxShadow: isRekomendasi ? "0 4px 24px rgba(13,148,136,0.12)" : undefined,
                     }}>
                         {isRekomendasi && (
-                            <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: "linear-gradient(90deg, #0891b2, #0d9488, #6366f1)" }} />
+                            <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, ${cfg.color}, #0d9488, #6366f1)` }} />
                         )}
                         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: isRekomendasi ? 14 : 10, color: cfg.color }}>
                             {cfg.icon}
@@ -2061,7 +2007,7 @@ function MarketReportRenderer({ report }: { report: string }) {
                                 {title}
                             </span>
                             {isRekomendasi && (
-                                <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99, background: "rgba(13,148,136,0.15)", border: "1px solid rgba(13,148,136,0.3)", color: "#0d9488", letterSpacing: "0.05em" }}>
+                                <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99, background: `${cfg.color}22`, border: `1px solid ${cfg.border}`, color: cfg.color, letterSpacing: "0.05em" }}>
                                     ★ AKSI STRATEGIS
                                 </span>
                             )}
@@ -2077,7 +2023,14 @@ function MarketReportRenderer({ report }: { report: string }) {
 }
 
 function parseMarketReport(report: string): { title: string; content: string }[] {
-    const knownSections = ["KEY INSIGHTS", "THREATS & OPPORTUNITIES", "REKOMENDASI STRATEGIS"];
+    const knownSections = [
+        "KEY INSIGHTS",
+        "THREATS & OPPORTUNITIES",
+        "REKOMENDASI PENINGKATAN LAYANAN",
+        "REKOMENDASI PENINGKATAN MARKETING",
+        // ← legacy header, kept for backward-compat
+        "REKOMENDASI STRATEGIS",
+    ];
     const results: { title: string; content: string }[] = [];
     let remaining = report;
 
