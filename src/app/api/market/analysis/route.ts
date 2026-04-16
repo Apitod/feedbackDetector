@@ -1,7 +1,5 @@
 // app/api/market/analysis/route.ts
 // Endpoint untuk menerima dan mengambil AI Market Intelligence report dari n8n.
-// Data ini murni dari scraping (TikTok, IG, Maps, FB) — tidak bercampur dengan
-// data feedback internal.
 
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -35,121 +33,135 @@ export async function GET(req: NextRequest) {
 }
 
 // ─── POST: Terima market analysis dari n8n ───────────────────────────────────
-// n8n "Save Market Analysis" node mengirim body berupa output raw AI Agent.
-// Contoh body yang diterima:
-// {
-//   "report": "KEY INSIGHTS:\n...\n\nTHREATS & OPPORTUNITIES:\n...\n\nREKOMENDASI STRATEGIS:\n...",
-//   "analyzed_comments": [...],
-//   "commentCount": 45,
-//   "platforms": ["tiktok","instagram","google_maps","facebook"]
-// }
-// — atau body langsung berupa JSON string dari AI output (field "output" / raw).
+// Mendukung 3 format body dari n8n:
+//   A) { report:"teks bersih", analyzed_comments:[...], commentCount:N, platforms:[...] }
+//   B) { report:"{\"report\":\"...\",\"analyzed_comments\":[...]}", commentCount:N, platforms:[...] }
+//      (report adalah JSON string dari AI — n8n belum bisa spread-nya)
+//   C) Body adalah raw JSON string dari seluruh objek
 export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
 
+        // Log 1000 chars pertama untuk debugging di terminal Next.js
         console.log(
-            "[POST /api/market/analysis] Body received:",
-            JSON.stringify(body).slice(0, 500)
+            "[market/analysis POST] body (1000 chars):",
+            JSON.stringify(body).slice(0, 1000)
         );
 
-        // ── Toleransi format body dari n8n ─────────────────────────────────
-        // Kasus 1: body adalah string mentah (n8n mengirim raw AI output)
-        // Kasus 2: body adalah object { output: "...", commentCount, platforms }
-        // Kasus 3: body adalah object { report: "...", commentCount, platforms }
-        let rawReport: string = "";
-        let bodyMeta = body;
+        // ── Helper: coba parse string sebagai JSON object ─────────────────────
+        function tryParseObj(s: string): Record<string, unknown> | null {
+            try {
+                // Bersihkan string dari format markdown atau karakter '=' yang tidak sengaja terkirim dari n8n
+                const clean = s
+                    .replace(/^={1,3}/, "") // Hapus leading =, ==, ===
+                    .replace(/^```json\s*/i, "")
+                    .replace(/\s*```$/m, "")
+                    .trim()
+                    // Hapus lagi jika ada `=` tertinggal setelah trim
+                    .replace(/^={1,3}/, "")
+                    .trim();
 
-        if (typeof body === "string") {
-            // n8n mengirim raw string sebagai body (bukan object)
-            rawReport = body.trim();
-            bodyMeta = {}; // tidak ada metadata
-        } else {
-            rawReport = (
-                body.report ||
-                body.output ||
-                body.text ||
-                body.response ||
-                body.answer ||
-                ""
-            );
+                const p = JSON.parse(clean);
+                if (p && typeof p === "object" && !Array.isArray(p)) {
+                    return p as Record<string, unknown>;
+                }
+            } catch { /* tidak valid JSON */ }
+            return null;
         }
 
-        if (!rawReport || rawReport.trim() === "") {
-            console.log(
-                "[POST /api/market/analysis] Report kosong. Type:", typeof body,
-                "Keys:", typeof body === "object" ? Object.keys(body) : "N/A (string)"
-            );
+        // ──1. Normalisasi body menjadi satu "candidate" object ───────────────
+        let candidate: Record<string, unknown>;
+
+        if (typeof body === "string") {
+            // Kasus C: seluruh body adalah raw string
+            const parsed = tryParseObj(body);
+            if (!parsed) {
+                return NextResponse.json(
+                    { success: false, message: "Body string bukan JSON valid." },
+                    { status: 400, headers: CORS_HEADERS }
+                );
+            }
+            candidate = parsed;
+        } else {
+            const bodyObj = body as Record<string, unknown>;
+
+            // Kasus A: report sudah plain text (tidak berawalan '{')
+            if (
+                typeof bodyObj.report === "string" &&
+                !bodyObj.report.trim().startsWith("{") &&
+                bodyObj.report.trim().length > 0
+            ) {
+                candidate = bodyObj;
+            } else {
+                // Kasus B: cari field yang menyimpan full JSON dari AI
+                let nestedCandidate: Record<string, unknown> | null = null;
+                for (const field of ["report", "output", "text", "response", "answer"]) {
+                    const val = bodyObj[field];
+                    if (typeof val === "string" && val.trim().length > 10) {
+                        const parsed = tryParseObj(val);
+                        if (parsed && typeof parsed.report === "string") {
+                            // Gabungkan: data dari AI (report, analyzed_comments) +
+                            // metadata dari n8n (commentCount, platforms)
+                            nestedCandidate = {
+                                ...bodyObj,      // commentCount, platforms dari n8n
+                                ...parsed,       // report, analyzed_comments dari AI
+                                report: parsed.report, // pastikan report = teks bersih
+                            };
+                            // Jika analyzed_comments hanya ada di parsed, jaga tetap ada
+                            if (Array.isArray(parsed.analyzed_comments) && !Array.isArray(bodyObj.analyzed_comments)) {
+                                nestedCandidate.analyzed_comments = parsed.analyzed_comments;
+                            }
+                            console.log(`[market/analysis POST] Nested JSON extracted from field '${field}'`);
+                            break;
+                        }
+                    }
+                }
+                candidate = nestedCandidate ?? bodyObj;
+            }
+        }
+
+        // ── 2. Ekstrak finalReport ────────────────────────────────────────────
+        const finalReport = (
+            typeof candidate.report === "string"
+                ? candidate.report
+                : typeof candidate.output === "string"
+                    ? candidate.output
+                    : ""
+        ).trim();
+
+        if (!finalReport) {
+            console.log("[market/analysis POST] Report kosong. Keys:", Object.keys(candidate));
             return NextResponse.json(
-                {
-                    success: false,
-                    message: `Field 'report' atau 'output' wajib diisi. Type diterima: ${typeof body}`,
-                },
+                { success: false, message: "Field 'report' wajib diisi." },
                 { status: 400, headers: CORS_HEADERS }
             );
         }
 
-        let finalReport = rawReport.trim();
-
-        // Coba parse jika AI mengembalikan JSON (dalam ```json block atau plain JSON)
-        try {
-            const jsonMatch = finalReport.match(/```json\s*([\s\S]*?)\s*```/);
-            const jsonString = jsonMatch
-                ? jsonMatch[1]
-                : finalReport.trim().startsWith("{")
-                ? finalReport
-                : null;
-
-            if (jsonString) {
-                const parsed = JSON.parse(jsonString);
-                if (parsed.report && typeof parsed.report === "string") {
-                    finalReport = parsed.report;
-                }
-            }
-        } catch {
-            // Bukan JSON — tetap gunakan teks mentah
+        // ── 3. Ekstrak analyzed_comments ──────────────────────────────────────
+        type AnalyzedComment = { comment: string; sentiment: string; topic: string };
+        let analyzedComments: AnalyzedComment[] = [];
+        if (Array.isArray(candidate.analyzed_comments)) {
+            analyzedComments = candidate.analyzed_comments as AnalyzedComment[];
         }
+        console.log(`[market/analysis POST] analyzed_comments: ${analyzedComments.length} items`);
 
-        // Toleran terhadap berbagai format jumlah komentar
+        // ── 4. Ekstrak commentCount ───────────────────────────────────────────
         const commentCount =
-            typeof (bodyMeta as Record<string, unknown>).commentCount === "number"
-                ? (bodyMeta as Record<string, unknown>).commentCount as number
-                : typeof (bodyMeta as Record<string, unknown>).commentCount === "string"
-                ? parseInt((bodyMeta as Record<string, unknown>).commentCount as string, 10) || 0
-                : 0;
+            typeof candidate.commentCount === "number"
+                ? candidate.commentCount
+                : typeof candidate.commentCount === "string"
+                    ? parseInt(candidate.commentCount, 10) || 0
+                    : 0;
 
-        // Toleran terhadap array atau comma-separated string
+        // ── 5. Ekstrak platforms ──────────────────────────────────────────────
         let platforms: string[] = [];
-        const bodyPlatforms = (bodyMeta as Record<string, unknown>).platforms;
-        if (Array.isArray(bodyPlatforms)) {
-            platforms = bodyPlatforms as string[];
-        } else if (typeof bodyPlatforms === "string" && bodyPlatforms.trim()) {
-            platforms = bodyPlatforms.split(",").map((s: string) => s.trim()).filter(Boolean);
+        if (Array.isArray(candidate.platforms)) {
+            platforms = candidate.platforms as string[];
+        } else if (typeof candidate.platforms === "string" && (candidate.platforms as string).trim()) {
+            platforms = (candidate.platforms as string).split(",").map((s) => s.trim()).filter(Boolean);
         }
 
-        // ── Extract analyzed_comments (array dari AI per-comment analysis) ──────
-        // n8n mengirim sebagai: { ..., analyzed_comments: [{comment, sentiment, topic}] }
-        // Bisa juga tersimpan di dalam JSON-parsed AI output
-        let analyzedComments: { comment: string; sentiment: string; topic: string }[] = [];
-        const rawComments = (bodyMeta as Record<string, unknown>).analyzed_comments;
-        if (Array.isArray(rawComments)) {
-            analyzedComments = rawComments as { comment: string; sentiment: string; topic: string }[];
-        } else {
-            // Coba ekstrak dari parsed JSON jika belum ditemukan di body langsung
-            try {
-                const jsonMatch = rawReport.match(/```json\s*([\s\S]*?)\s*```/);
-                const jsonString = jsonMatch
-                    ? jsonMatch[1]
-                    : rawReport.trim().startsWith("{") ? rawReport : null;
-                if (jsonString) {
-                    const parsed = JSON.parse(jsonString);
-                    if (Array.isArray(parsed.analyzed_comments)) {
-                        analyzedComments = parsed.analyzed_comments;
-                    }
-                }
-            } catch { /* tetap kosong */ }
-        }
-
+        // ── 6. Simpan ke store ────────────────────────────────────────────────
         const saved = addMarketAnalysis({
             report: finalReport,
             generatedAt: new Date().toISOString(),
@@ -158,12 +170,16 @@ export async function POST(req: NextRequest) {
             analyzed_comments: analyzedComments,
         });
 
+        console.log(
+            `[market/analysis POST] Saved OK — reportLen:${finalReport.length}, comments:${analyzedComments.length}, commentCount:${commentCount}, platforms:${JSON.stringify(platforms)}`
+        );
+
         return NextResponse.json(
             { success: true, message: "Market analysis berhasil disimpan", data: saved },
             { status: 201, headers: CORS_HEADERS }
         );
     } catch (err) {
-        console.error("[POST /api/market/analysis]", err);
+        console.error("[market/analysis POST] Error:", err);
         return NextResponse.json(
             { success: false, message: "Format data tidak valid" },
             { status: 400, headers: CORS_HEADERS }
