@@ -123,15 +123,48 @@ export default function DashboardPage() {
 
     // ─── CSV Parser ───────────────────────────────────────────────────────────
     const parseCSV = (text: string): OfflineRow[] => {
-        const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
-        if (lines.length < 2) throw new Error("File CSV minimal 2 baris (header + 1 data).");
+        if (!text.trim()) throw new Error("File CSV kosong.");
+        
+        const delimiter = text.indexOf(';') !== -1 && (text.indexOf(',') === -1 || (text.indexOf(';') < text.indexOf('\n') && text.split('\n')[0].includes(';'))) ? ';' : ',';
 
-        // Deteksi delimiter: koma atau titik koma
-        const delimiter = lines[0].includes(";") ? ";" : ",";
+        const rawRows: string[][] = [];
+        let currentRow: string[] = [];
+        let currentCell = "";
+        let inQuotes = false;
+        
+        for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+            if (char === '"') {
+                if (inQuotes && text[i + 1] === '"') {
+                    currentCell += '"';
+                    i++;
+                } else {
+                    inQuotes = !inQuotes;
+                }
+            } else if (char === delimiter && !inQuotes) {
+                currentRow.push(currentCell.trim());
+                currentCell = "";
+            } else if ((char === '\n' || char === '\r') && !inQuotes) {
+                if (char === '\r' && text[i + 1] === '\n') i++;
+                if (currentCell !== "" || currentRow.length > 0) {
+                    currentRow.push(currentCell.trim());
+                    rawRows.push(currentRow);
+                    currentRow = [];
+                    currentCell = "";
+                }
+            } else {
+                currentCell += char;
+            }
+        }
+        if (currentCell !== "" || currentRow.length > 0) {
+            currentRow.push(currentCell.trim());
+            rawRows.push(currentRow);
+        }
 
-        const headers = lines[0].split(delimiter).map((h) => h.trim().replace(/^"|"$/g, "").toLowerCase());
+        const validRows = rawRows.filter(r => r.some(c => c !== ""));
+        if (validRows.length < 2) throw new Error("File CSV minimal 2 baris (header + 1 data).");
 
-        // Flexible header matching
+        const headers = validRows[0].map(h => h.toLowerCase());
         const findCol = (h: string[], ...candidates: string[]) =>
             h.findIndex((x) => candidates.some((c) => x.includes(c)));
 
@@ -144,8 +177,8 @@ export default function DashboardPage() {
         }
 
         const rows: OfflineRow[] = [];
-        for (let i = 1; i < lines.length; i++) {
-            const cols = lines[i].split(delimiter).map((c) => c.trim().replace(/^"|"$/g, ""));
+        for (let i = 1; i < validRows.length; i++) {
+            const cols = validRows[i];
             const isiKeluhan = cols[colKeluhan] ?? "";
             if (!isiKeluhan.trim()) continue;
             rows.push({
@@ -697,21 +730,6 @@ export default function DashboardPage() {
                     >
                         {/* Left: info */}
                         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                            <div
-                                style={{
-                                    width: 44,
-                                    height: 44,
-                                    borderRadius: 12,
-                                    background: "linear-gradient(135deg, #7c3aed, #ec4899)",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    boxShadow: "0 6px 20px rgba(124,58,237,0.4)",
-                                    flexShrink: 0,
-                                }}
-                            >
-                                <Rocket size={20} color="white" />
-                            </div>
                             <div>
                                 <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>
                                     Mulai Analisis AI Terpadu
@@ -784,8 +802,7 @@ export default function DashboardPage() {
                                     </>
                                 ) : (
                                     <>
-                                        <Rocket size={16} />
-                                        🚀 Mulai Menganalisis
+                                        Mulai Menganalisis
                                     </>
                                 )}
                             </button>
@@ -1255,7 +1272,7 @@ export default function DashboardPage() {
                                             Upload Data Feedback Offline
                                         </h2>
                                         <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
-                                            CSV dengan header: <code style={{ background: "var(--bg-secondary)", padding: "1px 5px", borderRadius: 4, fontSize: 11 }}>Nama Petugas, Isi Keluhan, Tanggal</code>
+                                            CSV dengan header: <code style={{ background: "var(--bg-secondary)", padding: "1px 5px", borderRadius: 4, fontSize: 11 }}>Nama, Ulasan/Keluhan, Tanggal</code>
                                         </p>
                                     </div>
                                 </div>
@@ -1544,7 +1561,7 @@ export default function DashboardPage() {
                                     }}>
                                     {marketTriggering
                                         ? <><Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> Menganalisis Pasar...</>
-                                        : <><Rocket size={16} /> 🚀 Mulai Analisis Market</>}
+                                        : <> Mulai Analisis Market</>}
                                 </button>
                             </div>
                         </div>
