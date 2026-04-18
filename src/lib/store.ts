@@ -11,6 +11,9 @@ export interface FeedbackItem {
     sentiment?: "positif" | "negatif" | "netral";
     triage?: "merah" | "kuning" | "hijau";
     createdAt: string;
+    kategori?: string;
+    prioritasManual?: string;
+    actionNeeds?: string;
 }
 
 // Consolidated AI analysis (satu laporan untuk semua feedback)

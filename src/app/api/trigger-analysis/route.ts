@@ -25,6 +25,34 @@ export async function POST(req: NextRequest) {
         // Terima array data offline (kosong pun tidak masalah)
         const offlineData = Array.isArray(body) ? body : [];
 
+        // Langsung simpan ke local database (global.feedbackStore) agar langsung muncul di tabel
+        if (global.feedbackStore && offlineData.length > 0) {
+            for (const row of offlineData) {
+                if (!row.isiKeluhan || String(row.isiKeluhan).trim() === "") continue;
+
+                const exists = global.feedbackStore.find(f => f.comment === row.isiKeluhan && f.source === "offline_rs");
+                if (exists) {
+                    if (!exists.kategori || exists.kategori === "-") exists.kategori = row.kategori || "-";
+                    if (!exists.prioritasManual || exists.prioritasManual === "-") exists.prioritasManual = row.prioritasManual || row.prioritas || "-";
+                    if (!exists.actionNeeds || exists.actionNeeds === "-") exists.actionNeeds = row.actionNeeds || "-";
+                } else {
+                    global.feedbackStore.push({
+                        id: `fb-off-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                        source: "offline_rs",
+                        comment: row.isiKeluhan,
+                        date: row.tanggal || new Date().toISOString(),
+                        rating: null,
+                        sentiment: "netral",
+                        triage: row.prioritasManual === "Merah" ? "merah" : (row.prioritasManual === "Kuning" ? "kuning" : "hijau"),
+                        createdAt: new Date().toISOString(),
+                        kategori: row.kategori || "-",
+                        prioritasManual: row.prioritasManual || row.prioritas || "-",
+                        actionNeeds: row.actionNeeds || "-",
+                    });
+                }
+            }
+        }
+
         console.log(
             `[POST /api/trigger-analysis] Memicu n8n dengan ${offlineData.length} data offline.`
         );

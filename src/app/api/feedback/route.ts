@@ -145,6 +145,21 @@ export async function POST(req: NextRequest) {
                 }
             }
 
+            // Support updating existing feedback if found
+            const existing = global.feedbackStore?.find(
+                (f) => f.comment === item.comment && f.source === source
+            );
+
+            if (existing) {
+                if (!existing.kategori || existing.kategori === "-") existing.kategori = item.kategori || "-";
+                if (!existing.prioritasManual || existing.prioritasManual === "-") existing.prioritasManual = item.prioritasManual || item.prioritas || "-";
+                if (!existing.actionNeeds || existing.actionNeeds === "-") existing.actionNeeds = item.actionNeeds || "-";
+                
+                // If sentiment/triage were updated from AI, we might want to update them too?
+                // The prompt only asked for kategori, prioritasManual, and actionNeeds
+                continue;
+            }
+
             const newItem = addFeedback({
                 source,
                 comment: item.comment ?? "",
@@ -152,6 +167,9 @@ export async function POST(req: NextRequest) {
                 rating: item.rating ?? null,
                 sentiment: sentiment ?? "netral",
                 triage: triage,
+                kategori: item.kategori || "-",
+                prioritasManual: item.prioritasManual || item.prioritas || "-",
+                actionNeeds: item.actionNeeds || "-",
             });
 
             created.push(newItem);

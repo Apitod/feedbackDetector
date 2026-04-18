@@ -62,6 +62,10 @@ interface OfflineRow {
     namaPetugas: string;
     isiKeluhan: string;
     tanggal: string;
+    kanal?: string;
+    kategori?: string;
+    prioritasManual?: string;
+    actionNeeds?: string;
 }
 
 export default function DashboardPage() {
@@ -123,68 +127,27 @@ export default function DashboardPage() {
 
     // ─── CSV Parser ───────────────────────────────────────────────────────────
     const parseCSV = (text: string): OfflineRow[] => {
-        if (!text.trim()) throw new Error("File CSV kosong.");
-        
-        const delimiter = text.indexOf(';') !== -1 && (text.indexOf(',') === -1 || (text.indexOf(';') < text.indexOf('\n') && text.split('\n')[0].includes(';'))) ? ';' : ',';
-
-        const rawRows: string[][] = [];
-        let currentRow: string[] = [];
-        let currentCell = "";
-        let inQuotes = false;
-        
-        for (let i = 0; i < text.length; i++) {
-            const char = text[i];
-            if (char === '"') {
-                if (inQuotes && text[i + 1] === '"') {
-                    currentCell += '"';
-                    i++;
-                } else {
-                    inQuotes = !inQuotes;
-                }
-            } else if (char === delimiter && !inQuotes) {
-                currentRow.push(currentCell.trim());
-                currentCell = "";
-            } else if ((char === '\n' || char === '\r') && !inQuotes) {
-                if (char === '\r' && text[i + 1] === '\n') i++;
-                if (currentCell !== "" || currentRow.length > 0) {
-                    currentRow.push(currentCell.trim());
-                    rawRows.push(currentRow);
-                    currentRow = [];
-                    currentCell = "";
-                }
-            } else {
-                currentCell += char;
-            }
-        }
-        if (currentCell !== "" || currentRow.length > 0) {
-            currentRow.push(currentCell.trim());
-            rawRows.push(currentRow);
-        }
-
-        const validRows = rawRows.filter(r => r.some(c => c !== ""));
-        if (validRows.length < 2) throw new Error("File CSV minimal 2 baris (header + 1 data).");
-
-        const headers = validRows[0].map(h => h.toLowerCase());
-        const findCol = (h: string[], ...candidates: string[]) =>
-            h.findIndex((x) => candidates.some((c) => x.includes(c)));
-
-        const colNama = findCol(headers, "nama", "petugas", "officer", "Nama Pengadu");
-        const colKeluhan = findCol(headers, "keluhan", "komentar", "comment", "isi", "text", "ulasan", "Deskripsi yang ingin diadukan");
-        const colTanggal = findCol(headers, "tanggal", "date", "waktu", "time", "Tanggal Pengaduan");   
-
-        if (colKeluhan === -1) {
-            throw new Error(`Kolom keluhan/komentar tidak ditemukan. Header yang tersedia: ${headers.join(", ")}`);
-        }
+        const lines = text.split(/\r?\n/).filter((line) => line.trim() !== "");
+        if (lines.length < 2) throw new Error("File CSV minimal 2 baris (header + 1 data).");
 
         const rows: OfflineRow[] = [];
-        for (let i = 1; i < validRows.length; i++) {
-            const cols = validRows[i];
-            const isiKeluhan = cols[colKeluhan] ?? "";
-            if (!isiKeluhan.trim()) continue;
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i];
+            // Regex pisahkan berdasarkan koma di luar tanda kutip ganda
+            const cols = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+            const cleanCols = cols.map((c) => c.replace(/^"|"$/g, "").trim());
+
+            // 0: tanggal, 1: kanal, 2: nama, 3: ulasan, 4: kategori, 5: prioritas, 7: actionNeeds
+            if (!cleanCols[3] || cleanCols[3].trim() === "") continue;
+
             rows.push({
-                namaPetugas: colNama !== -1 ? (cols[colNama] ?? "") : "",
-                isiKeluhan,
-                tanggal: colTanggal !== -1 ? (cols[colTanggal] ?? new Date().toISOString()) : new Date().toISOString(),
+                tanggal: cleanCols[0] || new Date().toISOString(),
+                kanal: cleanCols[1] || "-",
+                namaPetugas: cleanCols[2] || "-",
+                isiKeluhan: cleanCols[3],
+                kategori: cleanCols[4] || "-",
+                prioritasManual: cleanCols[5] || "-",
+                actionNeeds: cleanCols[7] || "-",
             });
         }
         return rows;

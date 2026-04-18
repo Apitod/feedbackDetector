@@ -20,6 +20,10 @@ interface OfflineFeedbackRow {
     namaPetugas: string;   // Nama Petugas
     isiKeluhan: string;    // Isi Keluhan / komentar
     tanggal: string;       // Tanggal keluhan
+    kategori?: string;
+    prioritasManual?: string;
+    prioritas?: string;
+    actionNeeds?: string;
 }
 
 // ─── POST: Terima parsed CSV data dan teruskan ke n8n ─────────────────────────
@@ -42,11 +46,41 @@ export async function POST(req: NextRequest) {
             if (!item.isiKeluhan || String(item.isiKeluhan).trim() === "") {
                 continue; // Lewati baris kosong
             }
-            rows.push({
+            
+            const row: OfflineFeedbackRow = {
                 namaPetugas: String(item.namaPetugas ?? "").trim(),
                 isiKeluhan: String(item.isiKeluhan ?? "").trim(),
                 tanggal: String(item.tanggal ?? new Date().toISOString()).trim(),
-            });
+                kategori: item.kategori || "-",
+                prioritasManual: item.prioritas || item.prioritasManual || "-",
+                actionNeeds: item.actionNeeds || "-",
+            };
+            
+            rows.push(row);
+
+            // Simpan data as request to global.feedbackStore
+            if (global.feedbackStore) {
+                const exists = global.feedbackStore.find(f => f.comment === row.isiKeluhan && f.source === "offline_rs");
+                if (exists) {
+                    if (!exists.kategori || exists.kategori === "-") exists.kategori = row.kategori;
+                    if (!exists.prioritasManual || exists.prioritasManual === "-") exists.prioritasManual = row.prioritasManual;
+                    if (!exists.actionNeeds || exists.actionNeeds === "-") exists.actionNeeds = row.actionNeeds;
+                } else {
+                    global.feedbackStore.push({
+                        id: `fb-off-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                        source: "offline_rs",
+                        comment: row.isiKeluhan,
+                        date: row.tanggal,
+                        rating: null,
+                        sentiment: "netral",
+                        triage: row.prioritasManual === "Merah" ? "merah" : (row.prioritasManual === "Kuning" ? "kuning" : "hijau"),
+                        createdAt: new Date().toISOString(),
+                        kategori: row.kategori,
+                        prioritasManual: row.prioritasManual,
+                        actionNeeds: row.actionNeeds,
+                    });
+                }
+            }
         }
 
         if (rows.length === 0) {
