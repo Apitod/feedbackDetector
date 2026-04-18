@@ -168,9 +168,9 @@ export default function DashboardPage() {
         const findCol = (h: string[], ...candidates: string[]) =>
             h.findIndex((x) => candidates.some((c) => x.includes(c)));
 
-        const colNama = findCol(headers, "nama", "petugas", "officer");
-        const colKeluhan = findCol(headers, "keluhan", "komentar", "comment", "isi", "text", "ulasan");
-        const colTanggal = findCol(headers, "tanggal", "date", "waktu", "time");
+        const colNama = findCol(headers, "nama", "petugas", "officer", "Nama Pengadu");
+        const colKeluhan = findCol(headers, "keluhan", "komentar", "comment", "isi", "text", "ulasan", "Deskripsi yang ingin diadukan");
+        const colTanggal = findCol(headers, "tanggal", "date", "waktu", "time", "Tanggal Pengaduan");   
 
         if (colKeluhan === -1) {
             throw new Error(`Kolom keluhan/komentar tidak ditemukan. Header yang tersedia: ${headers.join(", ")}`);
