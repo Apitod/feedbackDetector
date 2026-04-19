@@ -98,7 +98,7 @@ export function FilterSelect({
                 onChange={(e) => onChange(e.target.value)}
                 style={{
                     appearance: "none",
-                    background: "rgba(13, 21, 48, 0.95)",
+                    background: "var(--bg-secondary)",
                     border: "1px solid var(--border-color)",
                     borderRadius: 8,
                     color: "var(--text-primary)",
@@ -112,7 +112,7 @@ export function FilterSelect({
                 }}
             >
                 {options.map((o) => (
-                    <option key={o.value} value={o.value} style={{ background: "#0d1530" }}>
+                    <option key={o.value} value={o.value} style={{ background: "white", color: "black" }}>
                         {o.label}
                     </option>
                 ))}

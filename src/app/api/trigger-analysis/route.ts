@@ -46,6 +46,7 @@ export async function POST(req: NextRequest) {
                 global.feedbackStore.push({
                     id: `fb-off-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                     source: "offline_rs",
+                    kanal: row.kanal || undefined,          // e.g. "Telp/SMS/WA", "Barcode Pengaduan"
                     comment: String(rawKeluhan).trim(),
                     date: row.tanggal || new Date().toISOString(),
                     rating: null,

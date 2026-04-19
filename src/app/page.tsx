@@ -33,9 +33,10 @@ import {
     FileCheck2,
     Telescope,
     ShieldAlert,
+    Activity,
 } from "lucide-react";
 import { FeedbackItem, AIAnalysis, MarketAnalysis } from "@/lib/store";
-import { SentimentPieChart, SourceBarChart } from "@/components/charts";
+import { SentimentPieChart, SourceBarChart, PriorityBarChart } from "@/components/charts";
 import { FilterSelect, RatingDisplay, SentimentBadge, SourceBadge, TriageBadge } from "@/components/ui-bits";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -82,7 +83,6 @@ export default function DashboardPage() {
     const [selectedRow, setSelectedRow] = useState<FeedbackItem | null>(null);
     const [isLive, setIsLive] = useState(true);
     const [analysisExpanded, setAnalysisExpanded] = useState(false);
-    const [theme, setTheme] = useState<"light" | "dark">("light");
     const [activeTab, setActiveTab] = useState<"internal" | "market">("internal");
 
     // ─── Market Intelligence State ───────────────────────────────────────────────
@@ -105,25 +105,6 @@ export default function DashboardPage() {
     // ─── Analysis trigger state ───────────────────────────────────────────────
     const [analysisTriggering, setAnalysisTriggering] = useState(false);
     const [triggerMessage, setTriggerMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-
-    // ─── Theme Management ─────────────────────────────────────────────────────
-    useEffect(() => {
-        const savedTheme = localStorage.getItem("theme") as "light" | "dark" | null;
-        if (savedTheme) {
-            setTheme(savedTheme);
-            document.documentElement.classList.toggle("dark", savedTheme === "dark");
-        } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-            setTheme("dark");
-            document.documentElement.classList.add("dark");
-        }
-    }, []);
-
-    const toggleTheme = () => {
-        const newTheme = theme === "light" ? "dark" : "light";
-        setTheme(newTheme);
-        localStorage.setItem("theme", newTheme);
-        document.documentElement.classList.toggle("dark", newTheme === "dark");
-    };
 
     // ─── CSV Parser (RFC 4180-compliant, handles multiline quoted fields) ────────
     const parseCSV = (text: string): OfflineRow[] => {
@@ -500,26 +481,6 @@ export default function DashboardPage() {
 
                     {/* Controls */}
                     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                        {/* Theme Toggle */}
-                        <button
-                            onClick={toggleTheme}
-                            style={{
-                                width: 36,
-                                height: 36,
-                                borderRadius: 10,
-                                background: "var(--bg-secondary)",
-                                border: "1px solid var(--border-color)",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                cursor: "pointer",
-                                color: "var(--accent-primary)",
-                                transition: "all 0.2s",
-                            }}
-                            title={`Switch to ${theme === "light" ? "Dark" : "Light"} Mode`}
-                        >
-                            {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
-                        </button>
                         {/* Live indicator */}
                         <button
                             onClick={() => setIsLive((v) => !v)}
@@ -869,7 +830,7 @@ export default function DashboardPage() {
                 <div
                     style={{
                         display: "grid",
-                        gridTemplateColumns: "1fr 1fr",
+                        gridTemplateColumns: "1fr 1fr 1fr",
                         gap: 16,
                         marginBottom: 24,
                     }}
@@ -885,7 +846,7 @@ export default function DashboardPage() {
                         <SentimentPieChart data={sentimentChartData} />
                     </div>
 
-                    {/* Bar Chart */}
+                    {/* Bar Chart: Platform */}
                     <div className="glass-card" style={{ padding: 24 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20 }}>
                             <BarChart3 size={16} color="var(--accent-cyan)" />
@@ -894,6 +855,21 @@ export default function DashboardPage() {
                             </h2>
                         </div>
                         <SourceBarChart data={sourceChartData} />
+                    </div>
+                    
+                    {/* Bar Chart: Priority */}
+                    <div className="glass-card" style={{ padding: 24 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20 }}>
+                            <Activity size={16} color="var(--accent-primary)" />
+                            <h2 style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>
+                                Distribusi Prioritas
+                            </h2>
+                        </div>
+                        <PriorityBarChart data={[
+                            { name: "Merah", value: feedbacks.filter(f => f.triage === "merah").length },
+                            { name: "Kuning", value: feedbacks.filter(f => f.triage === "kuning").length },
+                            { name: "Hijau", value: feedbacks.filter(f => f.triage === "hijau").length }
+                        ]} />
                     </div>
                 </div>
 
@@ -1110,6 +1086,27 @@ export default function DashboardPage() {
                                             <tr key={fb.id}>
                                                 <td>
                                                     <SourceBadge source={fb.source} />
+                                                    {(() => {
+                                                        const genericKanals = ["offline", "offline rs", "offline_rs", "google maps", "google_maps", "instagram", "tiktok", "facebook"];
+                                                        const kanal = fb.kanal?.trim();
+                                                        if (!kanal || genericKanals.includes(kanal.toLowerCase())) return null;
+                                                        return (
+                                                            <span style={{
+                                                                display: "block",
+                                                                marginTop: 4,
+                                                                fontSize: 10,
+                                                                fontWeight: 600,
+                                                                color: "var(--text-muted)",
+                                                                letterSpacing: "0.02em",
+                                                                whiteSpace: "nowrap",
+                                                                overflow: "hidden",
+                                                                textOverflow: "ellipsis",
+                                                                maxWidth: 100,
+                                                            }}>
+                                                                {kanal}
+                                                            </span>
+                                                        );
+                                                    })()}
                                                 </td>
                                                 <td style={{ maxWidth: 300 }}>
                                                     <p

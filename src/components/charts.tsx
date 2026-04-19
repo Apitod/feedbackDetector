@@ -199,7 +199,7 @@ export function SourceBarChart({
                     {data.map((entry) => (
                         <linearGradient
                             key={entry.name}
-                            id={`bar-grad-${entry.name}`}
+                            id={`bar-grad-${entry.name.replace(/\s+/g, '-')}`}
                             x1="0"
                             y1="0"
                             x2="0"
@@ -235,7 +235,88 @@ export function SourceBarChart({
                     {data.map((entry) => (
                         <Cell
                             key={entry.name}
-                            fill={`url(#bar-grad-${entry.name})`}
+                            fill={`url(#bar-grad-${entry.name.replace(/\s+/g, '-')})`}
+                        />
+                    ))}
+                </Bar>
+            </BarChart>
+        </ResponsiveContainer>
+    );
+}
+
+// ─── Bar Chart: Distribusi Prioritas ──────────────────────────────────────────
+const PRIORITY_COLORS: Record<string, string> = {
+    Merah: "#ef4444",
+    Kuning: "#f59e0b",
+    Hijau: "#22c55e",
+};
+
+export function PriorityBarChart({
+    data,
+}: {
+    data: { name: string; value: number }[];
+}) {
+    if (!data.length || data.every((d) => d.value === 0)) {
+        return (
+            <div
+                style={{
+                    height: 220,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "var(--text-muted)",
+                    fontSize: 13,
+                }}
+            >
+                Belum ada data prioritas
+            </div>
+        );
+    }
+
+    return (
+        <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={data} margin={{ top: 5, right: 10, bottom: 5, left: -20 }}>
+                <defs>
+                    {data.map((entry) => (
+                        <linearGradient
+                            key={entry.name}
+                            id={`priority-grad-${entry.name.replace(/\s+/g, '-')}`}
+                            x1="0"
+                            y1="0"
+                            x2="0"
+                            y2="1"
+                        >
+                            <stop
+                                offset="0%"
+                                stopColor={PRIORITY_COLORS[entry.name] ?? "#6366f1"}
+                                stopOpacity={0.9}
+                            />
+                            <stop
+                                offset="100%"
+                                stopColor={PRIORITY_COLORS[entry.name] ?? "#6366f1"}
+                                stopOpacity={0.4}
+                            />
+                        </linearGradient>
+                    ))}
+                </defs>
+                <XAxis
+                    dataKey="name"
+                    tick={{ fill: "#64748b", fontSize: 11, fontWeight: 500 }}
+                    axisLine={false}
+                    tickLine={false}
+                />
+                <YAxis
+                    allowDecimals={false}
+                    tick={{ fill: "#64748b", fontSize: 11 }}
+                    axisLine={false}
+                    tickLine={false}
+                />
+                <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(99,102,241,0.06)" }} />
+                <Bar dataKey="value" name="Jumlah" radius={[6, 6, 0, 0]} maxBarSize={60}>
+                    {data.map((entry) => (
+                        <Cell
+                            key={entry.name}
+                            fill={`url(#priority-grad-${entry.name.replace(/\s+/g, '-')})`}
                         />
                     ))}
                 </Bar>

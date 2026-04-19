@@ -5,6 +5,7 @@
 export interface FeedbackItem {
     id: string;
     source: "instagram" | "tiktok" | "facebook" | "google_maps" | string;
+    kanal?: string;      // Sub-channel spesifik, e.g. "Telp/SMS/WA", "Barcode Pengaduan"
     comment: string;
     date: string | null;
     rating: number | string | null;

@@ -157,12 +157,16 @@ export async function POST(req: NextRequest) {
                     existing.prioritasManual = item.prioritasManual || legacyPrioritas;
                 }
                 if (item.actionNeeds && item.actionNeeds !== "-") existing.actionNeeds = item.actionNeeds;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                if ((item as any).kanal) existing.kanal = (item as any).kanal;
                 updated.push(existing);
                 continue;
             }
 
             const newItem = addFeedback({
                 source,
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                kanal: (item as any).kanal || undefined,
                 comment: item.comment ?? "",
                 date: item.date ?? new Date().toISOString(),
                 rating: item.rating ?? null,
