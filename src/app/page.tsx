@@ -67,6 +67,7 @@ interface OfflineRow {
     kategori?: string;
     prioritasManual?: string;
     actionNeeds?: string;
+    source: string;
 }
 
 export default function DashboardPage() {
@@ -186,6 +187,7 @@ export default function DashboardPage() {
                 kategori: cleanCols[4] || "-",
                 prioritasManual: cleanCols[5] || "-",
                 actionNeeds: cleanCols[7] || "-",
+                source: "offline_rs",
             });
         }
         return rows;
