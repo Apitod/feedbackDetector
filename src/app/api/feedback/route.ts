@@ -50,14 +50,14 @@ export async function POST(req: NextRequest) {
         }
 
         const created: FeedbackItem[] = [];
+        const updated: FeedbackItem[] = [];
 
         for (const item of items) {
             // Validasi field wajib
             if (!item.source || !item.comment) {
                 console.log("[POST /api/feedback] Item dilewati - source:", item.source, "comment:", item.comment ? "ada" : "kosong");
-                continue; // Lewati item yang tidak valid
+                continue;
             }
-
 
             // Auto-detect sentiment dari komentar jika belum ada
             let sentiment = item.sentiment as FeedbackItem["sentiment"];
@@ -103,7 +103,6 @@ export async function POST(req: NextRequest) {
             if (!triage) {
                 const textLower = (item.comment ?? "").toLowerCase();
                 
-                // RED: Safety/Medical Risk/Severe Reputation
                 if (
                     textLower.includes("licin") || 
                     textLower.includes("jatuh") || 
@@ -118,9 +117,7 @@ export async function POST(req: NextRequest) {
                     textLower.includes("obat salah")
                 ) {
                     triage = "merah";
-                } 
-                // YELLOW: Comfort/Facility/Queue/Poor Service
-                else if (
+                } else if (
                     textLower.includes("kotor") || 
                     textLower.includes("panas") || 
                     textLower.includes("antri") || 
@@ -138,25 +135,29 @@ export async function POST(req: NextRequest) {
                     sentiment === "negatif"
                 ) {
                     triage = "kuning";
-                }
-                // GREEN: Default for Neutral or Positive
-                else {
+                } else {
                     triage = "hijau";
                 }
             }
 
-            // Support updating existing feedback if found
-            const existing = global.feedbackStore?.find(
+            // ─── UPSERT: update jika sudah ada, insert jika baru ─────────────────
+            const existingIdx = global.feedbackStore?.findIndex(
                 (f) => f.comment === item.comment && f.source === source
-            );
+            ) ?? -1;
 
-            if (existing) {
-                if (!existing.kategori || existing.kategori === "-") existing.kategori = item.kategori || "-";
-                if (!existing.prioritasManual || existing.prioritasManual === "-") existing.prioritasManual = item.prioritasManual || item.prioritas || "-";
-                if (!existing.actionNeeds || existing.actionNeeds === "-") existing.actionNeeds = item.actionNeeds || "-";
-                
-                // If sentiment/triage were updated from AI, we might want to update them too?
-                // The prompt only asked for kategori, prioritasManual, and actionNeeds
+            if (existingIdx >= 0 && global.feedbackStore) {
+                // Update semua field yang relevan agar AI sentiment/triage bisa diperbarui
+                const existing = global.feedbackStore[existingIdx];
+                existing.sentiment = sentiment ?? existing.sentiment;
+                existing.triage = triage ?? existing.triage;
+                if (item.kategori && item.kategori !== "-") existing.kategori = item.kategori;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const legacyPrioritas = (item as any).prioritas as string | undefined;
+                if ((item.prioritasManual || legacyPrioritas) && (item.prioritasManual || legacyPrioritas) !== "-") {
+                    existing.prioritasManual = item.prioritasManual || legacyPrioritas;
+                }
+                if (item.actionNeeds && item.actionNeeds !== "-") existing.actionNeeds = item.actionNeeds;
+                updated.push(existing);
                 continue;
             }
 
@@ -168,7 +169,8 @@ export async function POST(req: NextRequest) {
                 sentiment: sentiment ?? "netral",
                 triage: triage,
                 kategori: item.kategori || "-",
-                prioritasManual: item.prioritasManual || item.prioritas || "-",
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                prioritasManual: item.prioritasManual || (item as any).prioritas || "-",
                 actionNeeds: item.actionNeeds || "-",
             });
 
@@ -178,8 +180,8 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
             {
                 success: true,
-                message: `${created.length} feedback berhasil disimpan`,
-                data: created,
+                message: `${created.length} feedback baru disimpan, ${updated.length} diperbarui`,
+                data: [...created, ...updated],
             },
             {
                 status: 201,

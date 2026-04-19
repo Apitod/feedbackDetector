@@ -125,19 +125,76 @@ export default function DashboardPage() {
         document.documentElement.classList.toggle("dark", newTheme === "dark");
     };
 
-    // ─── CSV Parser ───────────────────────────────────────────────────────────
+    // ─── CSV Parser (RFC 4180-compliant, handles multiline quoted fields) ────────
     const parseCSV = (text: string): OfflineRow[] => {
-        const lines = text.split(/\r?\n/).filter((line) => line.trim() !== "");
-        if (lines.length < 2) throw new Error("File CSV minimal 2 baris (header + 1 data).");
+        // Parse CSV char-by-char to correctly handle quoted multiline fields
+        const parseCSVRows = (csv: string): string[][] => {
+            const result: string[][] = [];
+            let currentRow: string[] = [];
+            let currentField = "";
+            let inQuotes = false;
+
+            for (let i = 0; i < csv.length; i++) {
+                const ch = csv[i];
+                const next = csv[i + 1];
+
+                if (inQuotes) {
+                    if (ch === '"' && next === '"') {
+                        // Escaped quote "" → literal "
+                        currentField += '"';
+                        i++;
+                    } else if (ch === '"') {
+                        // End of quoted field
+                        inQuotes = false;
+                    } else {
+                        // Regular char inside quotes (including embedded newlines)
+                        currentField += ch;
+                    }
+                } else {
+                    if (ch === '"') {
+                        inQuotes = true;
+                    } else if (ch === ',') {
+                        currentRow.push(currentField);
+                        currentField = "";
+                    } else if (ch === '\r' && next === '\n') {
+                        // Windows-style CRLF end of record
+                        currentRow.push(currentField);
+                        result.push(currentRow);
+                        currentRow = [];
+                        currentField = "";
+                        i++; // skip \n
+                    } else if (ch === '\n') {
+                        // Unix-style LF end of record
+                        currentRow.push(currentField);
+                        result.push(currentRow);
+                        currentRow = [];
+                        currentField = "";
+                    } else {
+                        currentField += ch;
+                    }
+                }
+            }
+            // Flush last field / row
+            if (currentRow.length > 0 || currentField !== "") {
+                currentRow.push(currentField);
+                if (currentRow.some((f) => f.trim() !== "")) {
+                    result.push(currentRow);
+                }
+            }
+            return result;
+        };
+
+        const allRows = parseCSVRows(text);
+        if (allRows.length < 2) throw new Error("File CSV minimal 2 baris (header + 1 data).");
 
         const rows: OfflineRow[] = [];
-        for (let i = 1; i < lines.length; i++) {
-            const line = lines[i];
-            // Regex pisahkan berdasarkan koma di luar tanda kutip ganda
-            const cols = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
-            const cleanCols = cols.map((c) => c.replace(/^"|"$/g, "").trim());
+        // Start from index 1 to skip header row
+        for (let i = 1; i < allRows.length; i++) {
+            const cleanCols = allRows[i].map((c) => c.trim());
 
-            // 0: tanggal, 1: kanal, 2: nama, 3: ulasan, 4: kategori, 5: prioritas, 7: actionNeeds
+            // Column mapping (0-indexed):
+            // 0: Tanggal, 1: Kanal, 2: Nama, 3: Ulasan, 4: Kategori, 5: Prioritas,
+            // 6: Tanggal (duplikat), 7: Action needs, 8: Status, 9: Tanggal Selesai, 10: P.I.C
             if (!cleanCols[3] || cleanCols[3].trim() === "") continue;
 
             rows.push({
@@ -1530,30 +1587,58 @@ export default function DashboardPage() {
                         </div>
                     </div>
 
-                    {/* Platform source pills */}
-                    <div style={{ display: "flex", gap: 10, marginBottom: 24, flexWrap: "wrap" }}>
-                        {[
-                            { label: "TikTok", color: "#25f4ee", bg: "rgba(37,244,238,0.08)", border: "rgba(37,244,238,0.25)" },
-                            { label: "Instagram", color: "#e1306c", bg: "rgba(225,48,108,0.08)", border: "rgba(225,48,108,0.25)" },
-                            { label: "Google Maps", color: "#4285f4", bg: "rgba(66,133,244,0.08)", border: "rgba(66,133,244,0.25)" },
-                            { label: "Facebook", color: "#1877f2", bg: "rgba(24,119,242,0.08)", border: "rgba(24,119,242,0.25)" },
-                        ].map(p => (
-                            <span key={p.label} style={{
-                                display: "inline-flex", alignItems: "center", gap: 6,
-                                padding: "5px 14px", borderRadius: 999,
-                                fontSize: 12, fontWeight: 600,
-                                background: p.bg, color: p.color,
-                                border: `1px solid ${p.border}`,
-                            }}>
-                                <span style={{ width: 6, height: 6, borderRadius: "50%", background: p.color, display: "inline-block" }} />
-                                {p.label}
-                            </span>
-                        ))}
-                        {marketAnalysis && (
-                            <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--text-muted)" }}>
-                                <Clock size={11} /> Diperbarui: {new Date(marketAnalysis.generatedAt).toLocaleString("id-ID")}
-                            </span>
-                        )}
+                    {/* ── Card Statistik Market ── */}
+                    <div
+                        className="stagger-children"
+                        style={{
+                            display: "grid",
+                            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                            gap: 16,
+                            marginBottom: 24,
+                        }}
+                    >
+                        {/* Total Feedback Market */}
+                        <div className="glass-card animate-fade-in" style={{ padding: 24 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                                <div>
+                                    <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 8 }}>
+                                        Total Feedback
+                                    </p>
+                                    <p className="stat-number gradient-text" style={{ background: "linear-gradient(135deg, #0891b2, #0d9488)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+                                        {loading ? "..." : (marketAnalysis?.commentCount ?? 0)}
+                                    </p>
+                                </div>
+                                <div style={{ padding: 10, borderRadius: 10, background: "rgba(8,145,178,0.1)", border: "1px solid rgba(8,145,178,0.2)" }}>
+                                    <MessageSquare size={20} color="#0891b2" />
+                                </div>
+                            </div>
+                            <p style={{ marginTop: 12, fontSize: 12, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 5 }}>
+                                {marketAnalysis && <Clock size={12} />}
+                                {marketAnalysis 
+                                    ? `Diperbarui: ${new Date(marketAnalysis.generatedAt).toLocaleString("id-ID")}`
+                                    : "Belum ada data."}
+                            </p>
+                        </div>
+
+                        {/* Platform Market */}
+                        <div className="glass-card animate-fade-in" style={{ padding: 24 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                                <div>
+                                    <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 8 }}>
+                                        Platform
+                                    </p>
+                                    <p className="stat-number" style={{ fontSize: "1.4rem", color: "#06b6d4" }}>
+                                        {loading ? "..." : (marketAnalysis?.platforms?.join(', ') || "—")}
+                                    </p>
+                                </div>
+                                <div style={{ padding: 10, borderRadius: 10, background: "rgba(6,182,212,0.1)", border: "1px solid rgba(6,182,212,0.2)" }}>
+                                    <Globe size={20} color="#06b6d4" />
+                                </div>
+                            </div>
+                            <p style={{ marginTop: 12, fontSize: 12, color: "var(--text-muted)" }}>
+                                Sumber data terhubung
+                            </p>
+                        </div>
                     </div>
 
                     {/* Market AI Report Card */}
