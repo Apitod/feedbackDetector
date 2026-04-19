@@ -38,14 +38,26 @@ export async function GET(req: NextRequest) {
 // }
 export async function POST(req: NextRequest) {
     try {
-        const body = await req.json();
+        let body = await req.json();
+
+        // [SILENT BUG FIX] Fix Double Stringify from n8n
+        // Jika body yang diterima adalah string, coba parse ulang menjadi objek.
+        if (typeof body === "string") {
+            try {
+                body = JSON.parse(body);
+            } catch (e) {
+                console.warn("[POST /api/feedback/analysis] Body is string but could not be re-parsed as JSON.");
+            }
+        }
 
         // DEBUG: log apa yang diterima dari n8n
         console.log("[POST /api/feedback/analysis] Body received:", JSON.stringify(body).slice(0, 500));
 
         // Terima berbagai field name yang mungkin dikirim n8n AI Agent:
         // output, text, response, answer, report
-        const report =
+        // Terima berbagai field name yang mungkin dikirim n8n AI Agent:
+        // report, output, answer dsb.
+        let report =
             body.report ||
             body.output ||
             body.text ||
@@ -53,12 +65,31 @@ export async function POST(req: NextRequest) {
             body.answer ||
             "";
 
-        const { feedbackCount, sources } = body;
+        const feedbackCount = body.feedbackCount || 0;
+        const sources = body.sources || [];
 
-        if (!report || typeof report !== "string" || report.trim() === "") {
-            console.log("[POST /api/feedback/analysis] Report kosong. Keys yang diterima:", Object.keys(body));
+        // JIKA 'report' masih berupa string JSON, coba parse satu kali lagi (Deep Recovery)
+        if (typeof report === "string" && report.trim().startsWith("{")) {
+            try {
+                const inner = JSON.parse(report);
+                if (inner.report) report = inner.report;
+            } catch (e) {
+                // Biarkan sebagai string jika gagal
+            }
+        }
+
+        if (!report || (typeof report !== "string" && typeof report !== "object")) {
+            console.log("[POST /api/feedback/analysis] Report kosong. Body yang diterima:", JSON.stringify(body));
             return NextResponse.json(
-                { success: false, message: `Field 'report' wajib diisi. Keys diterima: ${Object.keys(body).join(", ")}` },
+                { 
+                    success: false, 
+                    message: `Field 'report' wajib diisi.`,
+                    debug: {
+                        keys_received: Object.keys(body),
+                        body_preview: JSON.stringify(body).slice(0, 100),
+                        type: typeof body
+                    }
+                },
                 { status: 400, headers: CORS_HEADERS }
             );
         }
