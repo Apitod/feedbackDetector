@@ -106,7 +106,7 @@ export function getStats() {
 
     const sentimentCount = all.reduce(
         (acc, item) => {
-            const s = item.sentiment ?? "netral";
+            const s = (item.sentiment ?? "netral").toLowerCase().trim();
             acc[s] = (acc[s] || 0) + 1;
             return acc;
         },

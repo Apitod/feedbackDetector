@@ -39,11 +39,12 @@ export function SentimentBadge({
     sentiment?: FeedbackItem["sentiment"];
 }) {
     if (!sentiment) return <span className="badge badge-neutral">Netral</span>;
+    const normalizedSentiment = sentiment.toLowerCase().trim();
     const config = {
         positif: { label: "Positif", cls: "badge-positive", icon: Smile },
         negatif: { label: "Negatif", cls: "badge-negative", icon: Frown },
         netral: { label: "Netral", cls: "badge-neutral", icon: Meh },
-    }[sentiment] ?? { label: "Netral", cls: "badge-neutral", icon: Meh };
+    }[normalizedSentiment] ?? { label: "Netral", cls: "badge-neutral", icon: Meh };
 
     const Icon = config.icon;
     return (
@@ -150,6 +151,7 @@ export function TriageBadge({
         <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="12" r="10"></circle></svg>
     );
 
+    const normalizedPriority = priority?.toLowerCase().trim() || "";
     const config = {
         merah: { 
             label: "MERAH (TINGGI)", 
@@ -169,7 +171,7 @@ export function TriageBadge({
             icon: Circle,
             style: { background: "rgba(34, 197, 94, 0.1)", color: "#22c55e", border: "1px solid rgba(34, 197, 94, 0.2)" }
         },
-    }[priority] ?? { label: priority, cls: "badge-neutral", icon: Circle, style: {} };
+    }[normalizedPriority] ?? { label: priority, cls: "badge-neutral", icon: Circle, style: {} };
 
     const Icon = config.icon;
     return (

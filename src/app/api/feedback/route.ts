@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
             }
 
             // Auto-detect sentiment dari komentar jika belum ada
-            let sentiment = item.sentiment as FeedbackItem["sentiment"];
+            let sentiment = (item.sentiment as FeedbackItem["sentiment"])?.toLowerCase().trim() as FeedbackItem["sentiment"] | undefined;
             if (!sentiment) {
                 const textLower = (item.comment ?? "").toLowerCase();
                 if (
@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
             }
 
             // Auto-detect triage from commentary if not provided
-            let triage = item.triage as FeedbackItem["triage"];
+            let triage = (item.triage as FeedbackItem["triage"])?.toLowerCase().trim() as FeedbackItem["triage"] | undefined;
             if (!triage) {
                 const textLower = (item.comment ?? "").toLowerCase();
                 

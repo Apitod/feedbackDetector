@@ -866,9 +866,9 @@ export default function DashboardPage() {
                             </h2>
                         </div>
                         <PriorityBarChart data={[
-                            { name: "Merah", value: feedbacks.filter(f => f.triage === "merah").length },
-                            { name: "Kuning", value: feedbacks.filter(f => f.triage === "kuning").length },
-                            { name: "Hijau", value: feedbacks.filter(f => f.triage === "hijau").length }
+                            { name: "Merah", value: feedbacks.filter(f => f.triage?.toLowerCase().trim() === "merah").length },
+                            { name: "Kuning", value: feedbacks.filter(f => f.triage?.toLowerCase().trim() === "kuning").length },
+                            { name: "Hijau", value: feedbacks.filter(f => f.triage?.toLowerCase().trim() === "hijau").length }
                         ]} />
                     </div>
                 </div>
@@ -1967,7 +1967,8 @@ function parseAIReport(report: string): { title: string; content: string }[] {
     const knownSections = [
         "RINGKASAN UMUM",
         "SENTIMEN DOMINAN",
-        "TEMUAN UTAMA PELANGGAN",
+        "TEMUAN UTAMA PASIEN",
+        "TEMUAN UTAMA PELANGGAN", // fallback for older prompts
         "MASALAH KRITIS (JIKA ADA)",
         "PELUANG PENINGKATAN",
         "PRIORITAS PENANGANAN (TRIASE)",
@@ -1975,21 +1976,55 @@ function parseAIReport(report: string): { title: string; content: string }[] {
     ];
 
     const results: { title: string; content: string }[] = [];
-    let remaining = report;
+    const lines = report.split("\n");
+    let currentSection = "RINGKASAN UMUM";
+    let currentContent: string[] = [];
+    
+    // First line logic
+    const firstLineClean = lines[0]?.replace(/\*/g, "").trim().toUpperCase() || "";
+    if (!knownSections.some(sec => firstLineClean.includes(sec))) {
+        // If the very first line is not a section header, it belongs to RINGKASAN UMUM
+    } else {
+        // Find which section it is and start with it, empty the currentSection until evaluated
+        currentSection = "";
+    }
 
-    for (let i = 0; i < knownSections.length; i++) {
-        const section = knownSections[i];
-        const nextSection = knownSections[i + 1];
-        const startIdx = remaining.indexOf(section + ":");
-        if (startIdx === -1) continue;
-
-        const contentStart = startIdx + section.length + 1; // skip ":"
-        const nextIdx = nextSection ? remaining.indexOf(nextSection + ":") : remaining.length;
-        const content = remaining.slice(contentStart, nextIdx === -1 ? undefined : nextIdx).trim();
-
-        if (content) {
-            results.push({ title: section, content });
+    const flush = () => {
+        if (currentSection) {
+            results.push({ title: currentSection, content: currentContent.join("\n").trim() });
         }
+    };
+
+    for (let line of lines) {
+        const cleanLine = line.replace(/\*/g, "").trim().toUpperCase();
+        let matchedSection = "";
+
+        for (const sec of knownSections) {
+            if (cleanLine.includes(sec)) {
+                matchedSection = sec;
+                break;
+            }
+        }
+
+        if (matchedSection) {
+            flush();
+            // Normalisasi penamaan section pasien vs pelanggan
+            currentSection = matchedSection === "TEMUAN UTAMA PELANGGAN" ? "TEMUAN UTAMA PASIEN" : matchedSection;
+            currentContent = [];
+        } else {
+            if (currentSection && line.trim() !== "") {
+                currentContent.push(line);
+            } else if (line.trim() !== "" && !currentSection && results.length === 0) {
+                currentSection = "RINGKASAN UMUM";
+                currentContent.push(line);
+            }
+        }
+    }
+    flush();
+
+    // Pastikan tidak kosong jika report berisi sesuatu
+    if (results.length === 0 && report.trim()) {
+        results.push({ title: "RINGKASAN UMUM", content: report.trim() });
     }
 
     return results;
@@ -2090,23 +2125,53 @@ function parseMarketReport(report: string): { title: string; content: string }[]
         "THREATS & OPPORTUNITIES",
         "REKOMENDASI PENINGKATAN LAYANAN",
         "REKOMENDASI PENINGKATAN MARKETING",
-        // ← legacy header, kept for backward-compat
-        "REKOMENDASI STRATEGIS",
+        "REKOMENDASI STRATEGIS", // legacy fallback
     ];
+    
     const results: { title: string; content: string }[] = [];
-    let remaining = report;
+    const lines = report.split("\n");
+    let currentSection = "KEY INSIGHTS";
+    let currentContent: string[] = [];
 
-    for (let i = 0; i < knownSections.length; i++) {
-        const section = knownSections[i];
-        const nextSection = knownSections[i + 1];
-        const startIdx = remaining.indexOf(section + ":");
-        if (startIdx === -1) continue;
+    const firstLineClean = lines[0]?.replace(/\*/g, "").trim().toUpperCase() || "";
+    if (knownSections.some(sec => firstLineClean.includes(sec))) {
+        currentSection = "";
+    }
 
-        const contentStart = startIdx + section.length + 1;
-        const nextIdx = nextSection ? remaining.indexOf(nextSection + ":") : remaining.length;
-        const content = remaining.slice(contentStart, nextIdx === -1 ? undefined : nextIdx).trim();
+    const flush = () => {
+        if (currentSection) {
+            results.push({ title: currentSection, content: currentContent.join("\n").trim() });
+        }
+    };
 
-        if (content) results.push({ title: section, content });
+    for (let line of lines) {
+        const cleanLine = line.replace(/\*/g, "").trim().toUpperCase();
+        let matchedSection = "";
+
+        for (const sec of knownSections) {
+            if (cleanLine.includes(sec)) {
+                matchedSection = sec;
+                break;
+            }
+        }
+
+        if (matchedSection) {
+            flush();
+            currentSection = matchedSection;
+            currentContent = [];
+        } else {
+            if (currentSection && line.trim() !== "") {
+                currentContent.push(line);
+            } else if (line.trim() !== "" && !currentSection && results.length === 0) {
+                currentSection = "KEY INSIGHTS";
+                currentContent.push(line);
+            }
+        }
+    }
+    flush();
+
+    if (results.length === 0 && report.trim()) {
+        results.push({ title: "KEY INSIGHTS", content: report.trim() });
     }
 
     return results;
